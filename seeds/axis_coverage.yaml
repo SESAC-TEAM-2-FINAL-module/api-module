@@ -1,0 +1,9 @@
+# axis_coverage — 해역 × 축 커버리지·계절 선언 (S12 이전 내용 미결 — 계획서 11절)
+# 형식:
+#   area_id:       해역 ID (areas.area_id)
+#   axis:          축 이름 (예: red_tide)
+#   covered:       커버리지 여부 (true / false)
+#   season_months: 적조 계절 월 목록 — 계절 밖 판정의 유일한 원천 (evaluation)
+#   reason:        선언 사유
+
+coverage: []

@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "api-module"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv",
+    "PyYAML",
+    "httpx",
+    "tenacity",
+]
+
+[project.optional-dependencies]
+# 이미지별 선택 의존성 — 계획서 6.1절
+# 한 단계의 라이브러리 갱신이 다른 이미지에 번지지 않게 한다
+collector = [
+    "httpx[http2]",
+]
+processor = [
+    "lxml",
+]
+interpolation = [
+    "numpy",
+    "scipy",
+]
+# grading, evaluation: 추가 없음
+
+# DB 드라이버 — 계획서 5.4절 (하나만 설치)
+db-postgres = [
+    "psycopg[binary]>=3.1",
+]
+db-mysql = [
+    "PyMySQL>=1.1",
+]
+
+test = [
+    "pytest>=8",
+    "pytest-asyncio",
+    "testcontainers[postgres]",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

@@ -1,0 +1,9 @@
+# areas — 적조 해역 목록 (S12 이전 내용 미결 — 계획서 11절)
+# 형식:
+#   area_id: 해역 식별자 (PK)
+#   name:    해역명
+#   center_lat: 중심 위도
+#   center_lng: 중심 경도
+#   radius_km:  대응 반경 (km)
+
+areas: []

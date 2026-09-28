@@ -1,0 +1,12 @@
+﻿station_id,network,station_name,lat,lng,is_estuary,in_demo_zone
+DT_0014,tide,통영,34.82777,128.43472,False,True
+DT_0016,tide,여수,34.74722,127.76555,True,True
+DT_0029,tide,거제도,34.80138,128.69916,False,True
+DT_0061,tide,삼천포,34.92416,128.06972,False,True
+DT_0049,tide,광양,34.90367,127.75483,True,True
+DT_0092,tide,여호항,34.66194,127.46916,True,True
+DT_0026,tide,고흥발포,34.48111,127.34277,False,True
+DT_0062,tide,마산,35.1975,128.57638,False,True
+DT_0063,tide,가덕도,35.02417,128.81093,False,True
+DT_0005,tide,부산,35.09638,129.03527,False,False
+DT_0001,tide,인천,37.45194,126.59222,True,False

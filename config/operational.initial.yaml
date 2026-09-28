@@ -1,0 +1,22 @@
+# config/operational.initial.yaml — 운영 조정 초기값
+# ConfigMap의 원본 · 이미지에 포함하지 않음
+# 계획서 2.0.6절 · 7.7절 · 4.9절
+# <미결> 값은 인계(S12) 전까지 결정 필요 — 스키마 검사에서 <미결> 거부
+
+schema: operational-v1
+
+tide:
+  flatline_minutes: <미결>   # 값 멈춤 감지 N분 (계획서 A2)
+
+stale_threshold_hours:
+  water_temp: 3
+  red_tide_bulletin: 72
+  salinity_tide: <미결>         # dtRecent 염분 신선도 (계획서 A2)
+  tide_level: <미결>
+  wind_speed: <미결>
+  air_temp: <미결>
+  dissolved_oxygen: <미결>      # I-4 0m DO 집계 결과 보고 결정 (계획서 A2)
+
+evaluation:
+  interpolation_stale_minutes: <미결>
+  grading_stale_minutes: <미결>

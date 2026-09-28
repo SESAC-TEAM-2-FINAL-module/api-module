@@ -1,0 +1,59 @@
+# ci/gate/expected.yaml — CI 게이트 기준 문서 (계획서 7.7절)
+# 판정 정의(settings)·건수(counts) 두 섹션만.
+# 워크로드 설정·운영 조정 값은 여기에 넣지 않는다 (계획서 7.7절).
+# <미결> 항목은 게이트 경고로 표시, 해당 단계 미완료 처리 (계획서 7.7절 *(제안)*).
+# I-0 초판 — 523·739·1029 I-0에서 원문 직접 집계로 확정.
+
+settings:
+  tide.stations: [DT_0014, DT_0016, DT_0029, DT_0061, DT_0026, DT_0062, DT_0063, DT_0049, DT_0092]
+  geo.lat_range: [33.0, 39.0]
+  geo.lng_range: [124.0, 132.0]
+  bulletin.species_allow: [Cochlodinium polykrikoides, Margalefidinium polykrikoides]
+  bulletin.grade_thresholds: [10, 100, 1000]
+  bulletin.current_window_days: <미결>
+  line.cast_gap_minutes: 60
+  line.surface_rule: <미결>
+  interpolation.method: M2
+  interpolation.power_p: 2
+  interpolation.n_neighbors: 5
+  interpolation.align_window_min: 30
+  interpolation.exclude_flatline: <미결>
+  interpolation.error_window_days: <미결>
+  grading.p95_thresholds.water_temp: [1.0, 2.0, 3.0]
+  quality.r1_salinity_min: 31.0
+  quality.r2_chlorophyll: {value: 10.0, delta: 5.0}
+  quality.r3_water_temp_range: [0, 35]
+  quality.r4_water_temp_delta_1h: 5.0
+  grading.salinity_mode: <미결>
+  grading.chlorophyll_estimate_enabled: false
+  grading.line_max_distance_km: <미결>
+  grading.fishery_max_distance_km: <미결>
+  grading.excluded_zones: <미결>
+  stale_threshold_hours.chlorophyll: null
+  contracts: {queue: queue-v1, tables: tables-v1, operational: operational-v1}
+
+counts:
+  femo_2023: {raw: 1008, stored: 1008}    # reverify_addendum 2.4 · line_depth_report_v2 B1
+  femo_2024: {raw: 1020, stored: 1020}    # 같음
+  femo_2025: {raw: 1022, stored: 1022}    # 같음
+  femo_2026: {raw: 0, status: OK_EMPTY, publication_check_rows: 1}  # reverify_report F1
+  soo_v2:
+    raw: 10445
+    south: 2584
+    south_lat33_kept: 523       # 남해 lat==33.0 정점 행 수 (폐구간 경계값). 개구간이면 제외 대상. I-0 원문 집계 확정
+    casts: 324
+    casts_one_zero: 324
+    empty_value_dropped: 739    # 남해 중 wtr_tmp·sal·dox 전부 빈 문자열 행. I-0 원문 집계 확정
+    coord_excluded: 1029        # 좌표 범위 밖: 동중국해 973(lat<33.0) + 동해 56(lon>132.0). I-0 원문 집계 확정
+  redtide_r1:
+    outer: 51
+    details: 50
+    stored_bulletins: 51
+    cochlodinium: 45
+    item2_missing_unknown: 1    # reverify_report R1 · 충족계획서 ③-1·③-7
+  redtide_r3:
+    outer: 15
+    not_graded: 10
+    detail_area_parts: 20       # reverify_addendum 1.3 (MULTI_IN_STRING 5건 × 2 + 10)
+  redtide_all:
+    unique_day_report: 66       # reverify_addendum 1.4.2

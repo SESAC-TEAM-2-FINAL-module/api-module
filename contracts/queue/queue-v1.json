@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "queue-v1",
+  "description": "단계 간 알림 메시지 스키마 (2.2절)",
+  "definitions": {
+    "raw_fetched": {
+      "type": "object",
+      "required": ["schema", "topic", "raw_id", "api", "tag", "fetched_at_utc"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {"type": "string", "const": "queue-v1"},
+        "topic": {"type": "string", "const": "raw.fetched"},
+        "raw_id": {"type": "string"},
+        "api": {"type": "string"},
+        "tag": {"type": "string"},
+        "fetched_at_utc": {"type": "string"}
+      }
+    },
+    "obs_loaded": {
+      "type": "object",
+      "required": ["schema", "topic", "load_id", "api", "source", "station_ids", "observed_from_utc", "observed_to_utc", "row_count"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {"type": "string", "const": "queue-v1"},
+        "topic": {"type": "string", "const": "obs.loaded"},
+        "load_id": {"type": "string"},
+        "api": {"type": "string"},
+        "source": {"type": "string", "enum": ["tide", "bulletin", "line", "fishery"]},
+        "station_ids": {"type": "array", "items": {"type": "string"}},
+        "observed_from_utc": {"type": "string"},
+        "observed_to_utc": {"type": "string"},
+        "row_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "interp_done": {
+      "type": "object",
+      "required": ["schema", "topic", "run_id", "load_id", "farm_count", "metric", "error_p95", "stations_used"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {"type": "string", "const": "queue-v1"},
+        "topic": {"type": "string", "const": "interp.done"},
+        "run_id": {"type": "string"},
+        "load_id": {"type": "string"},
+        "farm_count": {"type": "integer", "minimum": 0},
+        "metric": {"type": "string"},
+        "error_p95": {"type": "number"},
+        "stations_used": {"type": "integer", "minimum": 0}
+      }
+    },
+    "grade_done": {
+      "type": "object",
+      "required": ["schema", "topic", "grade_run_id", "axis", "farm_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {"type": "string", "const": "queue-v1"},
+        "topic": {"type": "string", "const": "grade.done"},
+        "grade_run_id": {"type": "string"},
+        "axis": {"type": "string"},
+        "farm_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "result_updated": {
+      "type": "object",
+      "required": ["schema", "topic", "farm_ids", "axes", "updated_at_utc"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {"type": "string", "const": "queue-v1"},
+        "topic": {"type": "string", "const": "result.updated"},
+        "farm_ids": {"type": "array", "items": {"type": "string"}},
+        "axes": {"type": "array", "items": {"type": "string"}},
+        "updated_at_utc": {"type": "string"}
+      }
+    }
+  }
+}

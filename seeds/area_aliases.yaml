@@ -1,0 +1,7 @@
+# area_aliases — 정규화 별칭 테이블 (S12 이전 내용 미결 — 계획서 11절)
+# 형식:
+#   alias_key: 정규화 키 (txt_seas 1~3단계 결과 또는 오타 원문 strip 결과)
+#   area_id:   연결 해역 ID (areas.area_id)
+#   source:    등록 출처
+
+aliases: []

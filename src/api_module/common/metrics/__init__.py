@@ -1,0 +1,29 @@
+from ._metrics import (
+    Counter, Gauge, Histogram,
+    collector_calls_total,
+    collector_retry_total,
+    collector_duration_seconds,
+    raw_bytes_total,
+    processor_parse_failure_total,
+    observation_latest_age_seconds,
+    observation_missing_ratio,
+    publication_check_total_count,
+    completeness_mismatch_total,
+    pipeline_event_lag_seconds,
+    interpolation_run_duration_seconds,
+    interpolation_error_p95,
+    interpolation_stations_used,
+    evaluation_state_total,
+    operational_config_info,
+)
+
+__all__ = [
+    "Counter", "Gauge", "Histogram",
+    "collector_calls_total", "collector_retry_total", "collector_duration_seconds",
+    "raw_bytes_total", "processor_parse_failure_total",
+    "observation_latest_age_seconds", "observation_missing_ratio",
+    "publication_check_total_count", "completeness_mismatch_total",
+    "pipeline_event_lag_seconds", "interpolation_run_duration_seconds",
+    "interpolation_error_p95", "interpolation_stations_used",
+    "evaluation_state_total", "operational_config_info",
+]
