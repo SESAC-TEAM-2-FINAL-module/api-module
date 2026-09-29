@@ -30,6 +30,10 @@
 | `processor/adapters/fishery/_adapter.py` | `$SRC_API/verify_nifs_api.py` :: `extract_dates()` | REFERENCE | DATE_Y/M/D int 변환 결함(한 자리 값 "5") → int() 후 format 으로 수정 |
 | `processor/adapters/fishery/_adapter.py` | `$SRC_API/verify_nifs_api.py` :: DMS 좌표 파싱 | REFERENCE | LATITUDE/LONGITUDE DMS → dms_to_decimal() (already in common/geo) |
 
+| `common/geo/_haversine.py` :: `haversine()` | `$SRC_IDW/src/idw.py` :: `haversine()`, `EARTH_RADIUS_KM` | TRANSPLANT | SHA-256: `6184B0C5622370627922B0F215281B80498FDCAE03C4D77BE4A59956C3BAF689`. 함수 본문 동일 — F12 P95 2.48 재현을 위해 상수·공식 변경 금지. 주석·타입힌트·docstring만 한국어로 변경 |
+| `interpolation/` :: IDW 계산, LOOCV | `$SRC_IDW/src/idw.py` :: `idw_estimate()`, `sorted_by_dist()` | TRANSPLANT | IDW 본체. 입력을 CSV가 아니라 DB·양식장 좌표로 |
+| `interpolation/` :: LOOCV 교차검증 | `$SRC_IDW/stage3_idw.py` :: `run_e1()` (2차 재검증) | TRANSPLANT | 그룹 내 동일 관측소 중복 제거(`drop_duplicates`) 포함판. `$SRC_IDW/src/experiments.py run_e1()` 사용 금지 |
+
 ## 원천 필드 확인 기록 — femoSeaList (I-5)
 
 | 필드 | 원천 필드명 | 확인 방법 | 확인일 |
