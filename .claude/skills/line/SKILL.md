@@ -109,7 +109,7 @@ description: "정선해양관측(sooList) 수집·가공 어댑터 — src/api_m
 | 새 경로 | 검증 코드 위치 | 처리 | 이식 시 반드시 바꿀 것 |
 | --- | --- | --- | --- |
 | `processor/adapters/line/` (수집부는 `collector/`) | `$SRC_IDW/src/normalizer.py` `normalize_line_with_depth()` (B v2) | **이식** | `group_type`을 원문 레코드 단위로 계산하는 수정본인지 확인 |
-| | `$SRC_IDW/line_depth_collect.py` 캐스트 로직(`cast_id_x60`) | **이식** | 열 이름의 X값을 `cast_rule_version`으로 분리 |
+| | `$SRC_IDW/line_depth_collect_v2.py` 캐스트 로직(`cast_id_x60`) | **이식** | 열 이름의 X값을 `cast_rule_version`으로 분리 |
 | | `$SRC_IDW/src/collector.py` `collect_line_survey()` | 참고 | 1년 창 1회 호출 |
 | | `$SRC_IDW/src/normalizer.py` `normalize_line()` | **사용 금지** | 수심 필드 폐기 |
 | | `$SRC_IDW/src/normalizer.py` `validate_coords()` · `config.py` `LAT_RANGE` | **사용 금지** | 개구간 — 위도 33.0 누락. 폐구간 검증은 `common-core`의 `common/geo/` |

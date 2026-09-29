@@ -9,7 +9,7 @@ from __future__ import annotations
 def validate_coords_closed(
     lat: float,
     lng: float,
-    lat_range: tuple[float, float] = (33.0, 39.0),
-    lng_range: tuple[float, float] = (124.0, 132.0),
+    lat_range: tuple[float, float],
+    lng_range: tuple[float, float],
 ) -> bool:
     return lat_range[0] <= lat <= lat_range[1] and lng_range[0] <= lng <= lng_range[1]

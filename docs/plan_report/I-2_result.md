@@ -66,14 +66,14 @@ S12에서 재실행 후 `docs/reports/`에 기록 예정.
 
 | 항목 | 코드 상태 | 내용 |
 |---|---|---|
-| completeness 불일치 | **미해결 — 알려진 한계** | `interpret()`가 item당 6개 metric rows를 반환하므로 `check_completeness(pr, rows, api)`에서 `len(rows) = items × 6 ≠ pr.total_count`. 현재 코드에서 **INCOMPLETE가 실제로 반환된다**. 해결하려면 `processor/main.py` 흐름 변경 또는 completeness 단위 정책 명시가 필요하여 미처리 상태. 계획서 반영 후보 등록. |
+| completeness 불일치 | **해결됨 (2026-09-29)** | `check_completeness`에 `actual_items: int \| None` 파라미터 추가. `processor/main.py`에서 `actual_items=len(pr.items)` 전달 — items 단위로 totalCount 비교. rows(metric 분해 후)는 비교 기준에서 제외. |
 | 다중 페이지 body 구성 | **미해결 — 알려진 규칙 충돌** | 페이지가 2개 이상일 때 synthetic body를 구성하므로 "원문 재직렬화 금지" 규칙과 충돌. 폴링 방식(numOfRows=300)에서 단일 페이지가 대부분이라 실제 발동 빈도는 낮으나 정책 미결. 계획서에 다중 페이지 합산 정책 명시 요청 등록. |
 
 ---
 
 ## 3. 새로 발견한 함정
 
-1. **`interpret()` rows 수와 `pr.total_count` 단위 불일치** (**미해결**): `dtRecent` totalCount는 관측 시점 수이고, interpret()는 시점 × 6 metric = rows. `check_completeness`가 INCOMPLETE를 반환한다. 해결하려면 check_completeness에 items 수를 따로 넘기거나, processor/main.py 흐름을 변경해야 한다.
+1. **`interpret()` rows 수와 `pr.total_count` 단위 불일치** (**해결됨 — 2026-09-29**): `check_completeness`에 `actual_items` 파라미터 추가. `processor/main.py`에서 `len(pr.items)` 주입으로 items 단위 비교 확립.
 
 2. **`STATION_INACTIVE` 판정 범위** (**미해결 — I-6 이후 보완 예정**): 현재 normalize()는 단일 수집 결과의 rows 내에서 최근 24h를 판단한다. 이전 수집의 데이터가 없으면 INACTIVE를 판정하지 못한다. DB 접근 계층(I-6)이 구현된 후 이전 rows를 쿼리해서 보완해야 한다.
 

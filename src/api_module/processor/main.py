@@ -50,7 +50,7 @@ def _process_one(raw_id: str, api: str, queue: Queue) -> None:
 
     rows = adapter.interpret(pr, meta)
     rows = adapter.normalize(rows)
-    completeness = check_completeness(pr, rows, api)
+    completeness = check_completeness(pr, rows, api, actual_items=len(pr.items))
     rows = apply_quality(rows, api)
 
     # 적재: DB 접근 계층 인터페이스 (I-6에서 구현)

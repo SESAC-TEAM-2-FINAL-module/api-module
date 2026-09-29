@@ -22,13 +22,16 @@ def check_completeness(
     rows: list[dict],
     api: str,
     request_window: tuple[str, str] | None = None,
+    actual_items: int | None = None,
 ) -> CompletenessResult:
     """
     totalCount 있는 API (dtRecent): 수령 건수 = totalCount
+      - actual_items: rows가 metric 분해 등으로 items × N이 되는 어댑터는 pr.items 수를 전달한다
     totalCount 없는 API (NIFS): 분할 합산은 collector-completeness 별도 수행
     필터 파라미터가 있는 API: 반환 행이 요청 창 안인지 확인
     """
-    actual = len(rows)
+    # totalCount 비교 기준: 호출자가 actual_items를 주면 그것(items 단위), 없으면 rows 수
+    actual = actual_items if actual_items is not None else len(rows)
 
     if pr.total_count is not None:
         if actual != pr.total_count:

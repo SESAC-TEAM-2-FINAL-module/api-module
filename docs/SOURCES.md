@@ -21,6 +21,29 @@
 | `processor/adapters/bulletin/_adapter.py` | — (신규) | 신규 | 등급 판정 5단계, txt_seas 정규화 5단계, 지점 분리, 별칭·시드 로딩 |
 | `seeds/areas.yaml` · `seeds/area_aliases.yaml` · `seeds/axis_coverage.yaml` | — | 신규 | 형식만. 내용 미결(계획서 11절) |
 
+| `collector/adapters/line/_adapter.py` | `$SRC_IDW/src/collector.py` :: `collect_line_survey()` | REFERENCE | 1년 창 1회 호출; pageNo 없음(페이징 없음) |
+| `processor/adapters/line/_adapter.py` | `$SRC_IDW/src/normalizer.py` :: `normalize_line_with_depth()` (B v2) | TRANSPLANT | group_type 원문 레코드 단위 계산; 좌표 범위 주입; obs_dtm KST→UTC(-9h) 변환 추가; metric 3종(wtr_tmp·sal·dox)만; 빈 값 레코드 MISSING 저장; is_surface 열 없음 |
+| `processor/adapters/line/_adapter.py` | `$SRC_IDW/line_depth_collect_v2.py` :: `_assign_casts()` + `cast_id_x60_map` | TRANSPLANT | 열 이름의 X값을 `cast_rule_version`으로 분리; 전제 감시(10 < gap ≤ 720분 → CAST_RULE_ASSUMPTION_BROKEN) 추가 |
+
+| `collector/adapters/fishery/_adapter.py` | `$SRC_IDW/src/collector.py` :: `collect_fishery_sea()` | REFERENCE | 달력 연도 단위 1회 호출; sdate=YYYY0101, edate=YYYY1231(올해는 오늘까지); 페이징 없음 |
+| `collector/fishery_watch.py` | — | 신규 | 게시 감시(주 1회 사전 읽기 → 건수 변화 시 전량 수집 같은 실행); 호출 실패 게시 대기 금지 |
+| `processor/adapters/fishery/_adapter.py` | `$SRC_API/verify_nifs_api.py` :: `extract_dates()` | REFERENCE | DATE_Y/M/D int 변환 결함(한 자리 값 "5") → int() 후 format 으로 수정 |
+| `processor/adapters/fishery/_adapter.py` | `$SRC_API/verify_nifs_api.py` :: DMS 좌표 파싱 | REFERENCE | LATITUDE/LONGITUDE DMS → dms_to_decimal() (already in common/geo) |
+
+## 원천 필드 확인 기록 — femoSeaList (I-5)
+
+| 필드 | 원천 필드명 | 확인 방법 | 확인일 |
+|---|---|---|---|
+| 수온 (표층) | `TEMP_S` | 픽스처 `femoSeaList_f3_2023_*.json` 직접 확인 | I-5 (2026-09-29) |
+| 수온 (저층) | `TEMP_B` | 동일 | I-5 (2026-09-29) |
+| 염분 (표층) | `SAL_S` | 동일 | I-5 (2026-09-29) |
+| 염분 (저층) | `SAL_B` | 동일 | I-5 (2026-09-29) |
+| 클로로필 (표층) | `CHL_S` | 동일 | I-5 (2026-09-29) |
+| 클로로필 (저층) | `CHL_B` | 동일 | I-5 (2026-09-29) |
+| 정점 | `FISHERY`, `LOCATION_POINT` | 동일 | I-5 (2026-09-29) |
+| 날짜 | `DATE_Y`, `DATE_M`, `DATE_D` | 동일 — 한 자리 정수값("5") 가능 확인 | I-5 (2026-09-29) |
+| 좌표 | `LATITUDE`, `LONGITUDE` | DMS 형식 `34°47′19″` 확인 | I-5 (2026-09-29) |
+
 ## 원천 시각 시간대 확인 기록 (계획서 SKILL.md ③-3 의무)
 
 | 항목 | 확인 결과 |
@@ -31,3 +54,12 @@
 | 시간대 | **KST(UTC+9) naive** — `$SRC_IDW/stage2_collect.py`의 `parse_dt()`에서 timezone 변환 없이 저장 확인 (`observations.csv` 시각이 KST 형식과 일치) |
 | 처리 | `processor/adapters/tide/_adapter.py` `_kst_to_utc()` — `-9h` 적용 후 UTC ISO 저장 |
 | 확인일 | I-2 (2026-09-28) |
+
+| 항목 | 확인 결과 |
+|---|---|
+| API | `sooList` — 정선해양관측 (국립수산과학원) |
+| 필드 | `obs_dtm` |
+| 형식 | `YYYY-MM-DD HH:MM` naive datetime (초 없음) |
+| 시간대 | **KST(UTC+9) naive** — 간접 증거 3종: ① IDW(`$SRC_IDW/src/normalizer.py`) 저장 시 timezone 변환 없음(KST로 취급) ② 픽스처 관측 시각이 한국 관측선 운항 시간대(오전·오후)와 일치 ③ 동일 기관(NIFS) dtRecent도 KST 확인(I-2). 직접 API 문서 확인 불가(계획서 반영 후보) |
+| 처리 | `processor/adapters/line/_adapter.py` `_kst_to_utc()` — `-9h` 적용 후 UTC ISO 저장 |
+| 확인일 | I-4 (2026-09-29) |

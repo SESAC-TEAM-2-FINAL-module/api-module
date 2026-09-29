@@ -84,7 +84,7 @@
 
 1. **`_parse_json`의 공단 JSON 계열**: 루트 키가 오퍼레이션명이고 그 안에 `header.code`가 있다. `for key, val in data.items()` 루프로 탐색하되, 이 계열에 `header`가 없는 다른 딕셔너리(예: `"version": "1.0"`)가 루트에 섞이면 오탐 가능. 확정 4종은 모두 JSON이므로 실제 도달 경로가 없으나, 향후 원천 추가 시 주의 필요.
 
-2. **`validate_coords_closed`의 기본값 하드코딩**: 파라미터에 기본값 `(33.0, 39.0)`, `(124.0, 132.0)`을 두었다. 판정 정의에서 읽어야 하는 값이 기본값으로 남아 있어, 어댑터가 실수로 기본값을 쓰면 정의 변경이 반영되지 않는다. 어댑터(I-2~I-5)에서 반드시 `load_definitions()`로 읽은 범위를 주입해야 한다.
+2. **`validate_coords_closed`의 기본값 하드코딩** (**해결됨 — 2026-09-29**): 기본값 제거 — `lat_range`·`lng_range` 모두 필수 인수로 변경. 어댑터는 반드시 `load_definitions()`로 읽은 범위를 주입해야 하며, 미주입 시 `TypeError`로 즉시 실패한다. `test_geo.py`도 `_LAT = (33.0, 39.0)` 상수로 명시 주입 방식으로 수정.
 
 3. **`processor/main.py` 적재 미구현**: DB 접근 계층(`repository` skill, I-6) 인터페이스 호출 자리에 주석만 두었다. `adapter_health` 갱신, `ingest_runs` 중복 방지(같은 `raw_id::parser_version`)도 마찬가지. I-6 이전에는 적재가 동작하지 않는다.
 
