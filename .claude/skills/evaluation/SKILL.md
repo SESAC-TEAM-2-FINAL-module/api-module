@@ -57,7 +57,7 @@ description: "침묵 판정과 결과 테이블 계약 — src/api_module/evalua
 | `ingest_runs.processed_at_utc` 대비 `farm_readings.computed_at_utc` | **산출 지연** (`grading` 정지) |
 | `farm_readings.none_reason` | 산출 불가·영역 `NONE` 사유 → `axis_status.reason`. 이 단계 자신의 판정 사유(추정 지연 등)가 있으면 그쪽이 우선 |
 
-- **`adapter_health` 갱신 규칙** (v1.5 4.5절 "헬스체크" 열) — `processor`가 원문 해석 결과로 기록한다
+- **`adapter_health` 갱신 규칙** (v1.5 4.5절 "헬스체크" 열) — `processor`가 원문 해석 결과로 기록한다. 키 `adapter`는 **수집 원천**(`tide`·`bulletin`·`line`·`fishery` — 결정 D2)이다. 한 원천에 api_id·`tag`가 여럿(어장환경 감시·백필·완전성)이라 원천 단위로 센다. 재시도 여부는 원문 메타의 `_retried`
   - **성공** — `OK`·`OK_EMPTY`·`NO_DATA`: `last_success_utc` 갱신, `consecutive_failures` 초기화
   - **실패** — `HTTP_ERROR`·`NET_ERROR`(진짜 장애): `last_failure_utc` 갱신, `consecutive_failures` 증가
   - **별도** — `TIMEOUT_05`: 재시도로 복구되면 `retry_recovered`만 올리고 실패로 세지 않는다. 재시도 후에도 `05`면 실패와 같게 센다 *(제안)*
@@ -111,18 +111,18 @@ description: "침묵 판정과 결과 테이블 계약 — src/api_module/evalua
 - **증상보다 원인**(3 → 6) — "오래됨"은 대개 호출 실패의 결과다
 - 3번 묶음 안은 순서가 필요 없다 — 한 호출의 결과는 하나라 서로 겹치지 않는다. 4번은 `grading`이 멈추면 수온까지 멈추므로 산출 지연이 먼저다
 
-**신선도 임계** — 값이 정해지지 않은 것은 `<미결>`이다. 판정 정의는 CI 게이트(7.7절 ①)에, 운영 조정은 `operational.initial.yaml`과 스키마(2.0.6절)에 등록한다. **운영 조정의 `<미결>`은 인계 전에 모두 정해져야 한다** — 스키마가 자리 표시를 거부하므로 ConfigMap으로 기동할 수 없다
+**신선도 임계** — 값이 정해지지 않은 것은 `<미결>`이다. 운영 조정 값은 **인계 초기값**이며 인계 후 인프라가 바꾼다(2.0.6절). 판정 정의는 CI 게이트(7.7절 ①)에, 운영 조정은 `operational.initial.yaml`과 스키마(2.0.6절)에 등록한다. **운영 조정의 `<미결>`은 인계 전에 모두 정해져야 한다** — 스키마가 자리 표시를 거부하므로 ConfigMap으로 기동할 수 없다
 
 | 판정 대상 | 설정 키 | 구분 (2.0.6절) | 값 | 근거·상태 |
 | --- | --- | --- | --- | --- |
 | 수온 관측 (`dtRecent`) | `stale_threshold_hours.water_temp` | 운영 조정 | 3 | v1.5 7.3절 |
-| 수온 **추정 지연** | `evaluation.interpolation_stale_minutes` | 운영 조정 | `<미결>` | 근거 없음 — 관측 임계(3h)를 그대로 쓸지 포함해 결정 필요 |
-| 염분 (`dtRecent`) | `stale_threshold_hours.salinity_tide` | 운영 조정 | `<미결>` | v1.5 `salinity: 2160`은 정선관측 기준이라 쓰지 않는다. 518분 연속 결측 판정(v1.5 20절)과 연동 |
-| 물때·풍속·기온 (`dtRecent`) | `stale_threshold_hours.tide_level` / `wind_speed` / `air_temp` | 운영 조정 | `<미결>` | v1.5 7.3절에 키 없음 |
-| DO (정선) | `stale_threshold_hours.dissolved_oxygen` | 운영 조정 | `<미결>` | v1.5 값 2160(90일)을 그대로 쓰면 마지막 유효값이 2025-11일 경우 데모 내내 STALE — 클로로필과 같은 구조. 0m DO 날짜별 확인(4.8절) 후 결정 |
+| 수온 **추정 지연** | `evaluation.interpolation_stale_minutes` | 운영 조정 | 60 (분) | 초기값 채택 2026-09-30 — sweep 권장 주기 10분, `water_temp` 3h(180분)의 1/3 |
+| 염분 (`dtRecent`) | `stale_threshold_hours.salinity_tide` | 운영 조정 | 3 | 초기값 채택 2026-09-30 — 같은 원천(`dtRecent`) `water_temp` 3h와 일관. v1.5 `salinity: 2160`은 정선관측 기준이라 쓰지 않는다. `DT_0061` 518분 연속 결측은 이 임계를 넘는 **예외 이벤트**로 본다(v1.5 20절, 7.1절 F11) |
+| 물때·풍속·기온 (`dtRecent`) | `stale_threshold_hours.tide_level` / `wind_speed` / `air_temp` | 운영 조정 | 3 / 3 / 3 | 초기값 채택 2026-09-30 — 같은 원천 `water_temp` 3h와 일관. v1.5 7.3절에 키 없음 |
+| DO (정선) | `stale_threshold_hours.dissolved_oxygen` | 운영 조정 | 1224 (**임시**) | 초기값 채택 2026-09-30 — 픽스처 0m DO의 유일한 반복 관측 간격 51일(=1224h, 단일 데이터포인트). **다년도 집계 후 재결정**. v1.5 값 2160(90일)을 그대로 쓰면 마지막 유효값이 2025-11일 경우 데모 내내 STALE — 클로로필과 같은 구조 |
 | 클로로필a | `stale_threshold_hours.chlorophyll` | **판정 정의** | `null` | 게시 감시로 판정 (4.5절, 충족계획서 1절) |
 | 적조 | `stale_threshold_hours.red_tide_bulletin` | 운영 조정 | 72 | v1.5 7.3절. **기준 시각은 마지막 성공 호출**(`adapter_health.last_success_utc`)이지 마지막 속보가 아니다. 적조 현재값의 유효 기간(`bulletin.current_window_days`, 4.8절)과는 다른 개념이다 |
-| **산출 지연** (`grading`) | `evaluation.grading_stale_minutes` | 운영 조정 | `<미결>` | 이 문서 신설 |
+| **산출 지연** (`grading`) | `evaluation.grading_stale_minutes` | 운영 조정 | 60 (분) | 이 문서 신설. 초기값 채택 2026-09-30 — 추정 지연과 같은 근거 |
 
 - 출력: `axis_status`(5.3절) → `result.updated`
 
@@ -137,7 +137,7 @@ description: "침묵 판정과 결과 테이블 계약 — src/api_module/evalua
 
 ### ③-3 설정 (2.0.6·4.9절)
 
-- 이 skill이 읽는 **운영 조정**(`tide.flatline_minutes`는 `processor` 전용이라 제외): `stale_threshold_hours.*`(**`chlorophyll` 제외**), `evaluation.interpolation_stale_minutes`·`grading_stale_minutes`. ConfigMap에서 **기동 시 한 번** 읽는다 — 실행 중 다시 읽지 않는다
+- 이 skill이 읽는 **운영 조정**(`tide.flatline_minutes`·`typhoon_active`는 `processor` 전용이라 제외): `stale_threshold_hours.*`(**`chlorophyll` 제외**), `evaluation.interpolation_stale_minutes`·`grading_stale_minutes`. ConfigMap에서 **기동 시 한 번** 읽는다 — 실행 중 다시 읽지 않는다
 - 이 skill이 읽는 **판정 정의**: `stale_threshold_hours.chlorophyll: null` — 클로로필은 임계 없이 게시 감시로 판정한다
 - 워크로드 설정(`evaluation-sweep` 주기, 권장 10분)은 `HANDOFF.md` 몫이다 — 코드에 박지 않는다
 - `<미결>` 값은 채우지 않는다. **판정 재생 픽스처가 임계에 상대적**이어서 값이 정해지면 그대로 돈다
@@ -159,6 +159,7 @@ description: "침묵 판정과 결과 테이블 계약 — src/api_module/evalua
 | `farm_readings` | `farm_id`, `axis`, `value`, `lower`, `upper`, `unit`, `derivation`, `provenance`, `none_reason`(nullable), `validated_scope`(nullable), `grade`(nullable — 적조만), `alertable`, `source_ref`, `distance_km`, `observed_at_utc`, `computed_at_utc` | 현재값. PK (`farm_id`, `axis`). **`provenance = NONE`이어도 계산된 값은 비우지 않는다**(4.8절). `none_reason`은 `evaluation`의 입력 — 화면 사유는 `axis_status.reason` |
 | `farm_reading_history` | 위 + `ts_utc` | 곡선용 시계열. 보존 기간 미결(11절). PK (`farm_id`, `axis`, `ts_utc`) |
 | `axis_status` | `farm_id`, `axis`, `state`, `reason`, `basis_utc`, `last_checked_utc` | 4.9절 쓰기 규칙. PK (`farm_id`, `axis`) |
+| `farm_areas` | `farm_id`, `area_id`(nullable), `distance_km`, `rule`, `computed_at_utc` | **모듈이 정한 양식장 해역**(1.6절, 개정 15). PK `farm_id`. `area_id`가 비면 반경 안 해역 없음. `rule` = `NEAREST_CENTER_WITHIN_RADIUS`. `evaluation`이 판정할 때마다 쓴다 |
 | `bulletins` · `bulletin_details` · `bulletin_detail_areas` | 위 표와 같음 | 적조 속보 원천. **해역 없는 속보**는 여기에만 있다(4.8절). 지점별 해역은 `bulletin_detail_areas` |
 | `interpolation_weights` · `interpolation_error` · `stations` | 위 표와 같음 | "근거 보기" — 사용 관측소·거리·가중치·오차 산출 기준 |
 
@@ -176,11 +177,12 @@ description: "침묵 판정과 결과 테이블 계약 — src/api_module/evalua
 | `provenance` | 영역 판정 — 오차·방법 기준 등급. `NONE`은 **신뢰 기준 밖** | 배지. `NONE`이 "값 없음"을 뜻하지 않는다 |
 | `none_reason` | `grading`이 기록한 `NONE` 사유 | 화면 표시용 사유가 아니다 — 표시는 `axis_status.reason` |
 | `lower` · `upper` | 수온: `value` ∓ 오늘의 오차 P95 | 최솟값·최댓값이 아니다 |
-| `source_ref` | 근거 원천 행의 키 — 수온 `run_id` / 인근 실측 `station_id` / DO·클로로필 `station_id@surveyed_on` / 적조 `cod_news#seq` | 사람이 읽는 설명이 아니다 |
+| `source_ref` | 근거 원천 행의 키 — 수온 `run_id` / 인근 실측 `station_id` / DO·클로로필 `station_id@observed_at_utc`(조사·관측 시각, UTC ISO — 개정 14) / 적조 `cod_news#seq` | 사람이 읽는 설명이 아니다 |
 | `validated_scope` | 계산값의 **검증 범위** — `STATION_SITES`는 관측소 위치에서만 교차검증했다는 뜻. 계산값(`COMPUTED`)에만 채운다 | 만 안쪽 양식장의 추정이 검증됐다는 뜻이 아니다 — **만 안쪽은 미검증** |
 | `alertable` | **발송 자격** — 계산 시점의 정적 자격 | 지금 보내라는 뜻이 아니다. 신선도를 담지 않는다 — 발송 후보는 `axis_status`와 함께 본다(W5) |
 | `bulletins.grade` · `bulletin_details.grade` · `farm_readings.grade` | 적조 공식 4단계 `NONE`(예비특보 미만) / `PRE_ADVISORY` / `ADVISORY` / `WARNING`, 그리고 `NOT_GRADED`(비대상 종) · `UNKNOWN`(원인생물·밀도·세부 행 없음) | 여기의 `NONE`은 `provenance`의 `NONE`(신뢰 기준 밖)과 **다르다**. `farm_readings.grade`는 `grading`이 고른 현재값 행의 등급이다 — 대시보드가 다시 고르지 않는다 |
 | `axis_status.state`·`reason` | 침묵 분류(4.9절 상태 값 17종)와 그 사유. 겹치면 4.9절 우선순위 | 화면 문구. `provenance`의 `NONE`과 다르다 — 값을 못 쓰는 경우는 `NOT_USABLE` |
+| `farm_areas.area_id` | 모듈이 정한 양식장 해역 — 반경 안 해역 중 중심이 가장 가까운 하나(`rule`). 커버리지 밖·계절 밖 판정에 쓴 해역이다(개정 15) | 행정구역·어업권 구역이 아니다. 적조 속보 대응은 반경 안 해역을 모두 쓴다 — 이 열 하나로 적조 해역을 다시 고르지 않는다 |
 | `observed_at_utc` · `computed_at_utc` · `basis_utc` · `last_checked_utc` | 관측 시각 · 산출 시각 · 판정에 쓴 가장 새 입력의 시각 · 판정 시각 | — |
 
 **대시보드 요구사항** — v1.5 원칙을 대시보드가 지킨다
@@ -225,7 +227,7 @@ description: "침묵 판정과 결과 테이블 계약 — src/api_module/evalua
 - **늦게 도착한 옛 판정이 새 판정을 덮지 않는다.** `basis_utc`로 비교하고, 같으면 `last_checked_utc`가 나중인 쪽(P12)
 - **sweep은 값을 만들지 않는다.** 앞 단계를 대신 돌리면 멈춘 단계가 가려진다
 - **이 단계가 멈추면 스스로 드러낼 방법이 없다.** `last_checked_utc`가 멈추는 것으로만 보이고, 판단은 대시보드(W3)다 — 그래서 `last_checked_utc`를 판정마다 반드시 갱신한다
-- **v1.5 `dissolved_oxygen: 2160`을 가져오지 않는다.** 마지막 유효값이 오래됐다면 DO가 데모 내내 STALE이 된다. 값은 `<미결>`이다
+- **v1.5 `dissolved_oxygen: 2160`을 가져오지 않는다.** 마지막 유효값이 오래됐다면 DO가 데모 내내 STALE이 된다. 초기값은 1224h **임시**다(다년도 집계 후 재결정)
 - **`none_reason`보다 이 단계 자신의 사유가 우선이다.** 추정 지연이면 `EXCLUDED_ZONE`보다 `INTERPOLATION_STALE`을 쓴다
 - **`provenance`의 `NONE`을 상태 자리에 쓰지 않는다.** 값을 못 쓰는 경우는 `NOT_USABLE`, 추정·산출이 멈춘 경우는 `INTERPOLATION_STALE`·`GRADING_STALE`이다. 대시보드는 `state`로 문구를 고른다(W8)
 - **겹치면 우선순위표대로 하나만 쓴다.** 판정 순서에 따라 같은 상황이 다른 상태로 나오면 P12 쓰기 규칙도 흔들린다
@@ -282,3 +284,9 @@ v1.5 4.5절 표의 각 행 + v1.4 추가 3종마다 입력과 기대 상태를 �
 | 결과 테이블 DDL | `repository` |
 
 이 skill이 **주인인 사실**(A.3): 추정 지연·산출 지연 판정, **상태 겹침 우선순위**, 운영 조정 판정 재생(`gate`), 결과 테이블 의미 계약의 배포.
+
+### 분할 합산 원문과 축 상태 (3.3·4.9절, 개정 17)
+
+- 원천 최근 처리 결과 조회와 산출 지연 기준은 **정기 경로 api_id 명시 목록**(`common.sources.regular_api_ids` — 기본·`-watch`·`-backfill`)으로만 본다. `*-completeness` 원문은 빼고, 문자열 패턴(`LIKE`·`startswith`)을 쓰지 않는다
+- 분할 합산 결과(`completeness_checks`)는 축 상태에 반영하지 않는다 *(제안)* — 운영 기록이다
+- 최근 처리 결과의 원인 분류는 `ingest_runs.status`(응답 상태 이름)로 찾는다 — `result_code`(원래 코드 `05` 등)가 아니다

@@ -1,0 +1,94 @@
+# evaluation Deployment + evaluation-sweep CronJob — 계획서 2.1절
+# 역할: grade.done 소비 → 침묵 분류 종합 → 결과 테이블 → result.updated
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evaluation
+  namespace: aquasentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: evaluation
+  template:
+    metadata:
+      labels:
+        app: evaluation
+    spec:
+      containers:
+        - name: evaluation
+          image: ${REGISTRY}/api-module/evaluation:latest
+          command: ["python", "-m", "evaluation.main"]
+          envFrom:
+            - secretRef:
+                name: api-module-secrets
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: api-module-secrets
+                  key: DATABASE_URL
+            - name: QUEUE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: api-module-secrets
+                  key: QUEUE_DSN
+            - name: OPERATIONAL_CONFIG_PATH
+              value: /config/operational.yaml
+          volumeMounts:
+            - name: operational-config
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+      volumes:
+        - name: operational-config
+          configMap:
+            name: api-module-operational
+---
+# evaluation-sweep CronJob — 신선도·단계 지연 점검 (앞 단계 대신 돌리지 않는다)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: evaluation-sweep
+  namespace: aquasentinel
+spec:
+  schedule: "*/10 * * * *"          # 10분 주기 (권장값 — HANDOFF.md)
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: evaluation-sweep
+              image: ${REGISTRY}/api-module/evaluation:latest
+              command: ["python", "-m", "evaluation.main", "sweep"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-module-secrets
+                      key: DATABASE_URL
+                - name: OPERATIONAL_CONFIG_PATH
+                  value: /config/operational.yaml
+              volumeMounts:
+                - name: operational-config
+                  mountPath: /config
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+          volumes:
+            - name: operational-config
+              configMap:
+                name: api-module-operational

@@ -3,7 +3,7 @@
 - outer·item2 두 층 해석 → bulletins·bulletin_details·bulletin_detail_areas 행
 - 등급 판정: UNKNOWN·NOT_GRADED·공식 4단계 (SKILL.md ③-4 5단계 순서)
 - txt_seas 정규화 5단계 + 지점 분리 → bulletin_detail_areas
-- unmapped_locations: DB 접근 계층(I-6) 이전 로그만 출력
+- unmapped_locations: `_type = unmapped_location` 행으로 낸다 — kind는 PARSE_FAILED만(OUT_OF_SCOPE 판별 규칙 없음). 적재는 processor (I-12)
 """
 from __future__ import annotations
 import re
@@ -134,7 +134,13 @@ class BulletinProcessorAdapter:
                 for part_no, area_key in enumerate(parts, start=1):
                     area_id = aliases.get(area_key)
                     if area_id is None:
-                        _log_unmapped(area_key, row["txt_seas_raw"])
+                        # 검토 큐 행 — processor 적재가 unmapped_locations에 쓴다 (4.3절, I-12)
+                        result.append({
+                            "_type": "unmapped_location",
+                            "area_key": area_key,
+                            "kind": KIND_PARSE_FAILED,
+                            "raw_sample": row["txt_seas_raw"],
+                        })
                     result.append({
                         "_type": "bulletin_detail_area",
                         "cod_news": row["cod_news"],
@@ -174,9 +180,10 @@ def _determine_grade(max_density: float, thresholds: list[int]) -> str:
 # ── txt_seas 정규화 ────────────────────────────────────────────────────────────
 
 def _normalize_txt_seas_1_3(raw: str, aliases: dict[str, str]) -> str:
-    """1단계 strip → 2단계 별칭 → 3단계 시도명 약칭 + 해역 접미 제거."""
+    """1단계 strip → 2단계 (예약) → 3단계 시도명 약칭 + 해역 접미 제거.
+    aliases는 4단계 이후 area_id 조회에만 쓴다(post-split). 2단계는 미사용.
+    """
     s = raw.strip().replace("\r", "").replace("\n", "")
-    s = aliases.get(s, s)
     for full, abbr in _SIDO_ABBREV.items():
         if s.startswith(full):
             s = abbr + s[len(full):]
@@ -250,9 +257,4 @@ def _parse_float(val) -> float | None:
         return None
 
 
-def _log_unmapped(area_key: str, raw_sample: str) -> None:
-    """미매핑 지점 로그 (DB 접근 계층 I-6 이전 임시)."""
-    print(
-        f"[bulletin-processor] unmapped: {area_key!r} (raw: {raw_sample!r})",
-        file=sys.stderr,
-    )
+

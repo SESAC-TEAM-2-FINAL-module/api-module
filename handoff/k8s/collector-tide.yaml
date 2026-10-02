@@ -1,0 +1,43 @@
+# collector-tide CronJob — 계획서 2.1절
+# 역할: dtRecent 9개소 → 원문 → raw.fetched 단계 간 알림
+# 워크로드 설정(주기)은 인계 후 인프라 소유 — 변경은 manifest 레포 PR
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: collector-tide
+  namespace: aquasentinel
+spec:
+  schedule: "*/10 * * * *"          # 10분 주기 (권장값 — HANDOFF.md)
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: collector-tide
+              image: ${REGISTRY}/api-module/collector:latest
+              # 인프라가 실제 태그로 교체 (이미지 알림 contracts/release/ 참고)
+              command: ["python", "-m", "collector.main", "tide"]
+              envFrom:
+                - secretRef:
+                    name: api-module-secrets
+              env:
+                # RAW_STORE_DSN — 객체 저장소 구현 이미지와 함께 켠다(계획서 11절 미결). 현재 이미지는 이 값이 있으면 기동을 멈춘다
+                # - name: RAW_STORE_DSN
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: api-module-secrets
+                #       key: RAW_STORE_DSN
+                - name: QUEUE_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-module-secrets
+                      key: QUEUE_DSN
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"

@@ -14,7 +14,7 @@
 | `processor/completeness/_checker.py` | `$SRC_API/verify_nifs_api.py` :: F2 분할 합산 | REFERENCE | 범위 불일치 결함 수정 — 범위 일치 검사를 먼저 수행 (`COMPARISON_RANGE_MISMATCH`) |
 | `common/queue/`, `common/config/`, `common/farm_sites/`, `common/contract_check/`, `common/metrics/`, `collector/main.py`, `processor/main.py`, `processor/quality/_rules.py` | — | 신규 | |
 | `collector/adapters/tide/_adapter.py` :: `_collect_station()` | `$SRC_IDW/stage2_collect.py` :: `_fetch_all_pages()` | TRANSPLANT | `totalCount`까지 전 페이지 수령; 사전 읽기로만 사용; 다중 페이지 시 합산 결과 JSON 구성(계획서 반영 후보); `_save_raw()` 사용 금지 |
-| `processor/adapters/tide/_adapter.py` | `$SRC_IDW/stage2_collect.py` (dtRecent 필드 처리) | TRANSPLANT | `obsrvnDt` KST naive 확인(I-2) → UTC (-9h) 변환 추가; 6개 metric (`wtem`·`slntQty`·`bscTdlvHgt`·`wspd`·`wdir`·`artmp`); `0.000` 결측 위치: processor normalize; `lot` 경도 필드는 stations.csv에서 읽으므로 어댑터 불필요 |
+| `processor/adapters/tide/_adapter.py` | `$SRC_IDW/stage2_collect.py` (dtRecent 필드 처리) | TRANSPLANT | `obsrvnDt` KST naive 확인(I-2) → UTC (-9h) 변환 추가; 6개 metric (`wtem`·`slntQty`·`bscTdlvHgt`·`wspd`·`wdir`·`artmp`); `0.000` 결측 위치: processor normalize; ~~`lot` 경도 필드는 stations.csv에서 읽으므로 어댑터 불필요~~ → `lot`은 원문에서 읽어 `stations`에 upsert한다(`TideProcessorAdapter.stations()`, 계획서 5.3절 결정 D5, I-12 2026-10-01) |
 | `processor/adapters/tide/_adapter.py` | `$SRC_IDW/stage1_verify.py` (응답 검증) | REFERENCE | 3종 스키마, 필드명 확인 |
 | `collector/adapters/bulletin/_adapter.py` | `$SRC_API/verify_nifs_api.py` (NIFS 호출 구조) | REFERENCE | `id=redtideList&key=…&sdate=…&edate=…` 파라미터 구조 참고 |
 | `processor/adapters/bulletin/_adapter.py` | `$SRC_API/verify_nifs_api.py` :: `nested_items` 중첩 처리 | REFERENCE | `probe_followup.py::probe_redtide()` 사용 금지 — item2 없는 속보 버리는 결함 |
@@ -64,6 +64,16 @@
 | API | `sooList` — 정선해양관측 (국립수산과학원) |
 | 필드 | `obs_dtm` |
 | 형식 | `YYYY-MM-DD HH:MM` naive datetime (초 없음) |
-| 시간대 | **KST(UTC+9) naive** — 간접 증거 3종: ① IDW(`$SRC_IDW/src/normalizer.py`) 저장 시 timezone 변환 없음(KST로 취급) ② 픽스처 관측 시각이 한국 관측선 운항 시간대(오전·오후)와 일치 ③ 동일 기관(NIFS) dtRecent도 KST 확인(I-2). 직접 API 문서 확인 불가(계획서 반영 후보) |
+| 시간대 | **KST(UTC+9) naive** — 간접 증거 3종: ① IDW(`$SRC_IDW/src/normalizer.py`) 저장 시 timezone 변환 없음(KST로 취급) ② 픽스처 관측 시각이 한국 관측선 운항 시간대(오전·오후)와 일치 ~~③ 동일 기관(NIFS) dtRecent도 KST 확인(I-2)~~ — 근거 아님: `dtRecent`는 국립해양조사원, `sooList`는 국립수산과학원(2026-10-01 정정, 계획서 1.4절 개정 13). 직접 API 문서 확인 불가 — 계획서 1.4절 *(제안)* |
 | 처리 | `processor/adapters/line/_adapter.py` `_kst_to_utc()` — `-9h` 적용 후 UTC ISO 저장 |
 | 확인일 | I-4 (2026-09-29) |
+
+| 항목 | 확인 결과 |
+|---|---|
+| API | `femoSeaList` — 어장환경 해수면 (국립수산과학원) |
+| 필드 | `DATE_Y`·`DATE_M`·`DATE_D` + `TIME_H`·`TIME_I` |
+| 형식 | 정수 문자열(한 자리 가능). 2023~2025 픽스처 시각 결측·범위 밖 0건 |
+| 시간대 | **KST** — 사용자 확인(2026-10-01, 원천 데이터에서 일관). 계획서 1.5절 |
+| 처리 | `processor/adapters/fishery/_adapter.py` `_assemble_observed_at_utc()` — `-9h` 후 UTC ISO, `survey_observations.observed_at_utc`(키) |
+| 확인일 | 개정 14 (2026-10-01) |
+

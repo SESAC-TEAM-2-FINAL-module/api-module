@@ -59,13 +59,13 @@ def _make_pr(items: list[dict], parse_status: str = "OK") -> ParsedResponse:
 
 def _item(fishery="가막만", point="1",
           lat="34°35′00″", lon="127°35′00″",
-          y=2025, m=10, d=1,
+          y=2025, m=10, d=1, th="9", ti="30",
           temp_s="18.0", sal_s="32.5", chl_s="1.5",
           temp_b="16.0", sal_b="33.0", chl_b="1.0"):
     return {
         "FISHERY": fishery, "LOCATION_POINT": point,
         "LATITUDE": lat, "LONGITUDE": lon,
-        "DATE_Y": y, "DATE_M": m, "DATE_D": d,
+        "DATE_Y": y, "DATE_M": m, "DATE_D": d, "TIME_H": th, "TIME_I": ti,
         "TEMP_S": temp_s, "SAL_S": sal_s, "CHL_S": chl_s,
         "TEMP_B": temp_b, "SAL_B": sal_b, "CHL_B": chl_b,
     }
@@ -130,9 +130,9 @@ class TestF1Backfill:
 # ── F2: 2026 빈 결과 → publication_checks ──────────────────────────────────
 
 class TestF2PublicationChecks:
-    def test_parse_status_ok(self):
+    def test_parse_status_ok_empty(self):
         pr = _parse_fixture("femoSeaList_f1_*.json")
-        assert pr.parse_status == "OK"
+        assert pr.parse_status == "OK_EMPTY"
 
     def test_items_empty(self):
         pr = _parse_fixture("femoSeaList_f1_*.json")
@@ -355,3 +355,40 @@ class TestWatchDelta:
             "prev_total_count": None,
         })
         assert rows[0]["delta"] is None
+
+
+# ── 조사 시각 (계획서 1.5·4.5·5.3절, 개정 14) ───────────────────────────────
+
+class TestObservedAt:
+    def test_kst_to_utc(self):
+        """DATE + TIME_H·TIME_I(KST) → UTC ISO. 2025-10-01 09:30 KST = 2025-10-01 00:30 UTC"""
+        rows = _ADAPTER.normalize(_ADAPTER.interpret(_make_pr([_item()]), _RAW_META))
+        assert {r["observed_at_utc"] for r in rows} == {"2025-10-01T00:30:00"}
+        assert {r["surveyed_on"] for r in rows} == {"2025-10-01"}
+
+    def test_kst_date_rollover(self):
+        """KST 이른 아침은 UTC 전날 — 08:33 KST(2025-11-05) = 2025-11-04 23:33 UTC"""
+        rows = _ADAPTER.normalize(_ADAPTER.interpret(
+            _make_pr([_item(y=2025, m=11, d=5, th="8", ti="33")]), _RAW_META))
+        assert rows[0]["observed_at_utc"] == "2025-11-04T23:33:00"
+        assert rows[0]["surveyed_on"] == "2025-11-05"
+
+    def test_same_day_two_surveys_are_distinct_keys(self):
+        """같은 정점·같은 날 다른 시각 조사는 다른 키 — 합쳐지지 않는다"""
+        rows = _ADAPTER.normalize(_ADAPTER.interpret(
+            _make_pr([_item(th="9", ti="0", chl_s="1.0"), _item(th="15", ti="0", chl_s="3.0")]), _RAW_META))
+        keys = {(r["station_id"], r["observed_at_utc"], r["layer"], r["metric"]) for r in rows}
+        assert len(keys) == len(rows) == 12
+
+    @pytest.mark.parametrize("th,ti", [("", "0"), (None, None), ("24", "0"), ("9", "60")])
+    def test_missing_or_bad_time_skips_record(self, th, ti):
+        """시각이 없거나 범위 밖이면 추정하지 않고 그 레코드를 건너뛴다"""
+        rows = _ADAPTER.interpret(_make_pr([_item(th=th, ti=ti)]), _RAW_META)
+        assert rows == []
+
+    def test_fixtures_all_have_time(self):
+        """2023~2025 픽스처 전 레코드가 조사 시각으로 적재 가능 — 건너뛰는 레코드 0"""
+        for y, n in (("2023", 1008), ("2024", 1020), ("2025", 1022)):
+            rows = _run_fixture(f"femoSeaList_f3_{y}_*.json")
+            assert len(rows) == n * 6
+

@@ -1,0 +1,30 @@
+# 운영 조정 ConfigMap 초기본 — 계획서 2.0.6절
+# 인계 후 인프라가 소유·변경한다.
+# 값 변경 절차: manifest 레포 PR → 운영 조정 게이트 → ArgoCD → 재시작
+# 게이트 명령: python ci/gate/run_gate.py (api-module 저장소에서)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-module-operational
+  namespace: aquasentinel   # 인프라가 조정
+data:
+  operational.yaml: |
+    schema: operational-v1
+
+    typhoon_active: false          # 태풍 특보 중 R4 급변 면제 — 운영자 수동 토글
+
+    tide:
+      flatline_minutes: 30         # C2 값 멈춤 감지 임계
+
+    stale_threshold_hours:
+      water_temp: 3
+      red_tide_bulletin: 72
+      salinity_tide: 3
+      tide_level: 3
+      wind_speed: 3
+      air_temp: 3
+      dissolved_oxygen: 1224       # 51일 임시값 — 다년도 집계 후 재결정
+
+    evaluation:
+      interpolation_stale_minutes: 60
+      grading_stale_minutes: 60

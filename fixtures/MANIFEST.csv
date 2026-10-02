@@ -26,3 +26,4 @@ fixtures/raw/C1D_p0_c1d_1790148158119.json,43db15af66971751a5476a4368a8d33c09d77
 fixtures/raw/C2_p0_c2_1790148160500.json,ee80516846fe1fe9177c6ef206ed2d9511e8a028988bd2701af02cd26ef1e1da,스키마 계열-해수부XML. 기대: OK
 fixtures/raw/C5_p4_2024_1790148238792.json,6d07bb2a5d95f2ab87ac62bcc04933b5179dda67f5edd6c773c085059e5c3172,스키마 계열-공단XML P4 2024. 기대: OK
 fixtures/raw/C5_p4_2025_1790148239887.json,77b28862594958d11821cffa54c977b1c49129778e91d6fa3e74deab4d325a38,스키마 계열-공단XML P4 2025. 기대: OK
+fixtures/synthetic/farms.csv,01bba95365c2a9896184ed1a0b85d8ce80a6a74b0d8852e9059081012b3b6944,합성 양식장 — area_id 포함 (A3 시드 테스트용)

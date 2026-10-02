@@ -99,6 +99,8 @@ def _parse_xml(body: str) -> ParsedResponse:
             pr.items = _items_from_el(body_el)
             if pr.total_count and pr.total_count > 0 and not pr.items:
                 pr.parse_status = "PARSE_FAILURE"
+            elif pr.parse_status == "OK" and not pr.items:
+                pr.parse_status = "OK_EMPTY"
         return pr
 
     pr.parse_status = "PARSE_FAILURE"
@@ -151,6 +153,8 @@ def _parse_json(body: str) -> ParsedResponse:
         pr.items = _to_list(raw_items)
         if pr.total_count and pr.total_count > 0 and not pr.items:
             pr.parse_status = "PARSE_FAILURE"
+        elif pr.parse_status == "OK" and not pr.items:
+            pr.parse_status = "OK_EMPTY"
         return pr
 
     # NIFS 계열: 최상위 header + body
@@ -166,6 +170,8 @@ def _parse_json(body: str) -> ParsedResponse:
             pr.items = _to_list(body_d.get("item"))
             if pr.total_count and pr.total_count > 0 and not pr.items:
                 pr.parse_status = "PARSE_FAILURE"
+            elif pr.parse_status == "OK" and not pr.items:
+                pr.parse_status = "OK_EMPTY"
         return pr
 
     # 예비: 공단 JSON — 루트가 오퍼레이션명, 결과 코드 키가 header.code
@@ -185,6 +191,8 @@ def _parse_json(body: str) -> ParsedResponse:
         pr.items = _to_list(val.get("item"))
         if pr.total_count and pr.total_count > 0 and not pr.items:
             pr.parse_status = "PARSE_FAILURE"
+        elif pr.parse_status == "OK" and not pr.items:
+            pr.parse_status = "OK_EMPTY"
         return pr
 
     pr.parse_status = "PARSE_FAILURE"

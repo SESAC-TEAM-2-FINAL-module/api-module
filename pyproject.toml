@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "api-module"
@@ -20,13 +20,23 @@ collector = [
     "httpx[http2]",
 ]
 processor = [
+    "SQLAlchemy>=2.0",   # DB 접근 계층 (common/repository/, 5.4절)
     "lxml",
+    "jsonschema",   # 운영 조정 기동 시 스키마 검사 (2.0.6절)
 ]
 interpolation = [
+    "SQLAlchemy>=2.0",
     "numpy",
     "scipy",
 ]
-# grading, evaluation: 추가 없음
+evaluation = [
+    "SQLAlchemy>=2.0",
+    "jsonschema",   # 운영 조정 기동 시 스키마 검사·gate (2.0.6절)
+]
+grading = [
+    "SQLAlchemy>=2.0",
+]
+# collector: DB에 쓰지 않는다 (2.3절, 결정 D1) — SQLAlchemy 없음
 
 # DB 드라이버 — 계획서 5.4절 (하나만 설치)
 db-postgres = [

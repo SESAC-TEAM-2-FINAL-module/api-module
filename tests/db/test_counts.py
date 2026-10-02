@@ -164,17 +164,9 @@ def _count(engine, table_name: str) -> int:
 
 
 def _write_bulletin_rows(repo, rows: list[dict]) -> None:
-    """_type별로 분류해 해당 메서드로 적재."""
-    bulletins, details, areas = [], [], []
-    for r in rows:
-        typ = r.get("_type", "")
-        row = {k: v for k, v in r.items() if k != "_type"}
-        if typ == "bulletin":
-            bulletins.append(row)
-        elif typ == "bulletin_detail":
-            details.append(row)
-        elif typ == "bulletin_detail_area":
-            areas.append(row)
-    repo.upsert_bulletins(bulletins)
-    repo.upsert_bulletin_details(details)
-    repo.upsert_bulletin_detail_areas(areas)
+    """운영 적재 코드(processor/_load.py)로 쓴다 — 테스트 안에 변환 코드를 두지 않는다 (I-12)"""
+    from collections import Counter
+    from datetime import datetime
+    from processor._load import _load_bulletin
+    with repo.transaction() as tx:
+        _load_bulletin(tx, None, rows, Counter(), datetime(2026, 9, 20), True)

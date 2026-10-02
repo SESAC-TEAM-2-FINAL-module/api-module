@@ -1,0 +1,104 @@
+# 운영 지표 정의 — 계획서 9절
+# 이미지 내부 공통 계측층: common/metrics/
+# 운영 탭용 지표 (대시보드 결과 테이블과 다름 — 계획서 9절)
+metrics:
+  # ── collector ──────────────────────────────────────────────
+  - name: collector_calls_total
+    type: counter
+    labels: [api, status]
+    description: "API 호출 횟수 (api: dtRecent·redtideList·sooList·femoSeaList, status: OK·NET_ERROR·HTTP_ERROR·PARSE_FAILURE 등)"
+
+  - name: collector_retry_total
+    type: counter
+    labels: [api]
+    description: "05(타임아웃) 재시도 횟수"
+
+  - name: collector_duration_seconds
+    type: histogram
+    labels: [api]
+    description: "API 호출 응답 시간 (초)"
+
+  - name: raw_bytes_total
+    type: counter
+    labels: [api]
+    description: "원문 본문 누적 크기 (bytes)"
+
+  # ── processor ──────────────────────────────────────────────
+  - name: processor_parse_failure_total
+    type: counter
+    labels: [api, parser_version]
+    description: "파싱 실패 횟수 (PARSE_FAILURE)"
+
+  - name: observation_latest_age_seconds
+    type: gauge
+    labels: [station_id, metric]
+    description: "관측소·지표별 최신 관측값 경과 시간 (신선도 확인용)"
+
+  - name: observation_missing_ratio
+    type: gauge
+    labels: [station_id, metric]
+    description: "관측소·지표별 결측 비율 (최근 24h)"
+
+  - name: publication_check_total_count
+    type: gauge
+    labels: [axis, year]
+    description: "게시 감시 수집 건수 (어장환경 femoSeaList 연도별)"
+
+  - name: completeness_mismatch_total
+    type: counter
+    labels: [api, status]
+    description: "분할 합산 결과 중 OK가 아닌 횟수 (status: INCOMPLETE·COMPARISON_RANGE_MISMATCH·INVALID) — 정선·어장환경"
+
+  - name: completeness_last_checked_timestamp
+    type: gauge
+    labels: [api]
+    description: "원천별 마지막 분할 합산 판정 시각 — 멈추면 주간 수집·검사기 정지"
+
+  - name: bulletin_window_missing_total
+    type: counter
+    labels: []
+    description: "적조 직전 원문 대조에서 빠진 속보 수 — 절단·철회·번호 교체 의심 (운영 이벤트 BULLETIN_WINDOW_MISSING, 계획서 3.3절 개정 18)"
+
+  - name: bulletin_window_check_skipped_total
+    type: counter
+    labels: [reason]
+    description: "적조 직전 원문 대조를 건너뛴 원문 수 (reason: NO_PREV·PREV_UNREADABLE·NO_WINDOW)"
+
+  # ── interpolation ──────────────────────────────────────────
+  - name: pipeline_event_lag_seconds
+    type: histogram
+    labels: [topic]
+    description: "단계 간 알림 큐 지연 (raw.fetched·obs.loaded·interp.done·grade.done)"
+
+  - name: interpolation_run_duration_seconds
+    type: histogram
+    labels: []
+    description: "IDW 추정 1회 실행 시간 (초)"
+
+  - name: interpolation_error_p95
+    type: gauge
+    labels: [metric, station_set_key]
+    description: "오늘의 오차 P95 — IDW 품질 지표"
+
+  - name: interpolation_stations_used
+    type: gauge
+    labels: [farm_id]
+    description: "양식장별 IDW에 쓰인 관측소 수"
+
+  # ── evaluation ─────────────────────────────────────────────
+  - name: evaluation_state_total
+    type: gauge
+    labels: [axis, state]
+    description: "축·상태별 양식장 수 (axis_status.state 분포)"
+
+  # ── 운영 조정 적재 ──────────────────────────────────────────
+  - name: operational_config_info
+    type: info
+    labels: [image, hash, schema]
+    description: "기동 시 적재된 운영 조정 설정 정보 (OPERATIONAL_CONFIG_LOADED 이벤트와 대응)"
+
+# 운영 이벤트 (ops_events 테이블에 기록)
+ops_events:
+  - OPERATIONAL_CONFIG_LOADED    # 기동 시 운영 조정 로드 성공 (hash 포함)
+  - COMPARISON_RANGE_MISMATCH    # 완전성 검사: 비교 범위 불일치 (검사 무효)
+  - CAST_RULE_ASSUMPTION_BROKEN  # 정선 캐스트 간격 규칙 위반 (10~720분 없음)

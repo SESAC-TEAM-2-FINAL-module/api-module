@@ -7,6 +7,8 @@ from __future__ import annotations
 from sqlalchemy import Table
 from sqlalchemy.engine import Connection
 
+_MAX_BIND_PARAMS = 60_000   # 한도 65,535보다 여유를 둔다
+
 
 def upsert(
     conn: Connection,
@@ -40,12 +42,18 @@ def upsert(
     rows = list(seen.values())
 
     dialect_name = conn.dialect.name
-    if dialect_name == "postgresql":
-        _upsert_pg(conn, table, rows, conflict_keys, update_cols)
-    elif dialect_name == "mysql":
-        _upsert_my(conn, table, rows, update_cols)
-    else:
+    if dialect_name not in ("postgresql", "mysql"):
         raise SystemExit(f"지원하지 않는 DB 방언: {dialect_name!r}")
+
+    # 한 문장의 바인드 매개변수 한도 — PostgreSQL·MySQL 모두 65,535. 행을 나눠 보낸다 (정선 1년 원문 ≈ 2.8만 행)
+    per_row = max(1, len(rows[0]))
+    chunk = max(1, _MAX_BIND_PARAMS // per_row)
+    for i in range(0, len(rows), chunk):
+        part = rows[i:i + chunk]
+        if dialect_name == "postgresql":
+            _upsert_pg(conn, table, part, conflict_keys, update_cols)
+        else:
+            _upsert_my(conn, table, part, conflict_keys, update_cols)
 
 
 def insert_only(conn: Connection, table: Table, rows: list[dict]) -> None:
@@ -80,6 +88,7 @@ def _upsert_my(
     conn: Connection,
     table: Table,
     rows: list[dict],
+    conflict_keys: list[str],
     update_cols: list[str],
 ) -> None:
     from sqlalchemy.dialects.mysql import insert as my_insert
@@ -87,5 +96,8 @@ def _upsert_my(
     stmt = my_insert(table).values(rows)
     if update_cols:
         update_dict = {col: stmt.inserted[col] for col in update_cols}
-        stmt = stmt.on_duplicate_key_update(**update_dict)
+    else:
+        # "있으면 그대로" — 키 열을 자기 값으로 두는 무변경 갱신. INSERT IGNORE는 CHECK 위반까지 경고로 삼키므로 쓰지 않는다
+        update_dict = {conflict_keys[0]: table.c[conflict_keys[0]]}
+    stmt = stmt.on_duplicate_key_update(**update_dict)
     conn.execute(stmt)

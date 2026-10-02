@@ -1,0 +1,10 @@
+{
+  "_comment": "이미지 알림 형식 — 계획서 2.0.5절. CI가 manifest 레포에 보내는 페이로드 명세.",
+  "_schema": "image-notice-v1",
+  "image": "api-module/interpolation",
+  "tag": "1.3.0",
+  "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "git_sha": "59e263a",
+  "built_at_utc": "2026-09-30T00:00:00",
+  "contracts_version": "tables-v2 / queue-v1 / operational-v1"
+}

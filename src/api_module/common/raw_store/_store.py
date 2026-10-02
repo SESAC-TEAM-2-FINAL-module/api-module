@@ -27,6 +27,10 @@ class RawStore:
     def get_body(self, key: str) -> str | None:
         raise NotImplementedError
 
+    def list_keys(self, prefix: str) -> list[str]:
+        """접두 아래 객체 키 전부 (순서 보장 없음) — 적조 직전 원문 대조가 날짜 폴더 단위로 쓴다 (3.3절, 개정 18)"""
+        raise NotImplementedError
+
 
 class LocalDiskStore(RawStore):
     def __init__(self, base_dir: str) -> None:
@@ -52,14 +56,27 @@ class LocalDiskStore(RawStore):
             return None
         return json.loads(path.read_text(encoding="utf-8")).get("body")
 
+    def list_keys(self, prefix: str) -> list[str]:
+        folder = self._base / prefix
+        if not folder.is_dir():
+            return []
+        return [p.relative_to(self._base).as_posix() for p in folder.rglob("*.json") if p.is_file()]
+
 
 _store: RawStore | None = None
 
 
 def _get_store() -> RawStore:
+    """
+    지금 구현은 로컬 디스크(`RAW_STORE_PATH`)뿐이다. 객체 저장소 구현은 인프라 확정 뒤에 붙인다(계획서 11절 미결).
+    `RAW_STORE_DSN`이 설정됐는데 지원하는 구현이 없으면 멈춘다 — 인프라가 저장소를 연결했는데 로컬 디스크에
+    조용히 쓰는 것을 막는다(단계 간에 원문이 공유되지 않는다)
+    """
     global _store
     if _store is None:
         import os
+        if os.environ.get("RAW_STORE_DSN"):
+            raise SystemExit("RAW_STORE_DSN이 설정됐으나 객체 저장소 구현이 이 이미지에 없다 — 로컬 디스크로 대체하지 않는다 (계획서 11절)")
         base = os.environ.get("RAW_STORE_PATH", "raw_data")
         _store = LocalDiskStore(base)
     return _store
@@ -79,3 +96,7 @@ def get_raw_meta(raw_id: str) -> dict | None:
 
 def get_raw_body(raw_id: str) -> str | None:
     return _get_store().get_body(raw_id)
+
+
+def list_raw_keys(prefix: str) -> list[str]:
+    return _get_store().list_keys(prefix)

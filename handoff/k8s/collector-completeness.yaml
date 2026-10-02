@@ -1,0 +1,43 @@
+# collector-completeness CronJob — 계획서 2.1절
+# 역할: 정선·어장환경마다 단일 창 1회 + 같은 창의 월 분할 수집 → 원문 저장 → completeness.collected (계획서 3.3절 개정 17)
+#       분할 원문에는 raw.fetched를 내지 않는다. 판정은 processor 이미지의 completeness-check 검사기
+#       적조는 제외 — processor의 직전 원문 대조로 본다 (계획서 개정 18)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: collector-completeness
+  namespace: aquasentinel
+spec:
+  schedule: "0 5 * * 0"             # 주 1회 일요일 새벽 5시 (UTC)
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: collector-completeness
+              image: ${REGISTRY}/api-module/collector:latest
+              command: ["python", "-m", "collector.main", "completeness"]
+              envFrom:
+                - secretRef:
+                    name: api-module-secrets
+              env:
+                # RAW_STORE_DSN — 객체 저장소 구현 이미지와 함께 켠다(계획서 11절 미결). 현재 이미지는 이 값이 있으면 기동을 멈춘다
+                # - name: RAW_STORE_DSN
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: api-module-secrets
+                #       key: RAW_STORE_DSN
+                - name: QUEUE_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-module-secrets
+                      key: QUEUE_DSN
+              resources:
+                requests:
+                  cpu: "200m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "1000m"
+                  memory: "512Mi"

@@ -49,7 +49,7 @@ description: "조위관측소 최신관측(dtRecent) 수집·가공 어댑터 �
 | 좌표 | 경도 필드명이 **`lot`** (오타 아님) |
 | 결측 | **`0.000`** = 결측 (R0). 수온·염분·pH에 적용 |
 | 스키마 | `response.header` / `OpenAPI_ServiceResponse.cmmMsgHeader` / **최상위 `header`** 가능 — 3종 모두 처리 |
-| 함정 | 마지막 페이지의 마지막 시각 그룹이 잘리면 "관측소 동시 무응답"처럼 보인다 → **수령 건수 = `totalCount`까지** |
+| 함정 | 마지막 페이지의 마지막 시각 그룹이 잘리면 "관측소 동시 무응답"처럼 보인다 → **수령 건수 = `totalCount`까지**. `totalCount`는 **관측 시점 수**다 — metric 분해 후 행 수와 다르다(3.3절) |
 
 - 키는 data.go.kr 일반 인증키 **Decoding 값을 `params=`로** 넘긴다. URL 문자열에 키를 조립하지 않는다(Encoding/Decoding 혼용 위험 — ④ 사용 금지)
 - 관측소 목록은 판정 정의 **`tide.stations`**(`config/definitions.yaml`)에서 읽는다. 현재 값: `[DT_0014, DT_0016, DT_0029, DT_0061, DT_0026, DT_0062, DT_0063, DT_0049, DT_0092]`. 코드에 박지 않는다
@@ -85,7 +85,7 @@ description: "조위관측소 최신관측(dtRecent) 수집·가공 어댑터 �
 | **R7** 파싱 실패 (최우선) | 전부 | 알려진 응답 스키마 어디에도 맞지 않음, 결과 코드를 못 찾음·빈 값 (3.2절) | `PARSE_FAILURE` — 원문 보관, 검토 대상. "데이터 없음"으로 축약하지 않는다 |
 | **R0** 결측 | tide·line·fishery | 수온·염분·pH가 `0.000` / 수온·염분·DO가 모두 빈 문자열인 레코드 | 결측(`MISSING`) — 관측 건수·커버리지에서 제외, 행은 저장 |
 | **R3** 물리 범위 | 전부 | 수온 < 0 또는 > 35 ℃ | `SENSOR_QUALITY` |
-| **R4** 급변 | tide | 수온 1시간 변화 절댓값 > 5.0 ℃. **태풍 특보 중에는 면제** | `SENSOR_QUALITY` |
+| **R4** 급변 | tide | 수온 1시간 변화 절댓값 > 5.0 ℃. **1시간 전 값 = 같은 관측소 수온 중 관측 시각이 [t − 60분 − 허용, t − 60분]인 가장 늦은 유효값** — 허용은 판정 정의 `quality.r4_lookback_tolerance_min`(15.4 = 관측소 최장 갱신 간격, 1.2절). 창 안에 값이 없으면 R4를 판정하지 않는다. **태풍 특보 중에는 면제** | `SENSOR_QUALITY` |
 | **R5** 침묵 | 전부 | 마지막 관측 이후 경과 > 축별 임계(4.9절 표). **적조는 예외 — 마지막 속보가 아니라 마지막 성공 호출 이후 경과**로 본다. 속보가 없는 것은 정상이고 호출 실패만 장애다(v1.5 7.3절 "이벤트성 — 호출 실패만 장애"). 클로로필은 임계 없이 게시 감시(4.5절) | `STALE` |
 
 - R1(생물부착)은 **`dtRecent` 염분에 적용하지 않는다** — 정선·어장환경 전용이다
@@ -96,7 +96,7 @@ description: "조위관측소 최신관측(dtRecent) 수집·가공 어댑터 �
 | 키 | 구분 | 이 skill에서의 쓰임 |
 | --- | --- | --- |
 | `tide.stations` | 판정 정의 | 수집 대상 관측소 |
-| `tide.flatline_minutes` | **운영 조정** — 값 `<미결>` | 값 멈춤 감지의 N분. 값을 채우지 않는다. 테스트는 이 값에 상대적으로 짠다 |
+| `tide.flatline_minutes` | **운영 조정** — 인계 초기값 30(2026-09-30) | 값 멈춤 감지의 N분. 테스트는 이 값에 상대적으로 짠다. ConfigMap에 없으면 멈추고 보고한다 — 기본값으로 감지를 끄지 않는다(2.0.6절) |
 | `interpolation.exclude_flatline` | 판정 정의 (주인 `interpolation`) | 이 skill은 플래그만 단다. 제외 여부는 쓰지 않는다 |
 
 - `tide.flatline_minutes`는 운영 조정 키 중 **`processor`가 쓰는 유일한 키**다. 운영 조정 게이트의 판정 재생(`evaluation` 이미지)으로 확인되지 않고, **스키마 검사와 PR 리뷰로만** 지켜진다(2.0.6절 남는 한계)
@@ -149,7 +149,9 @@ description: "조위관측소 최신관측(dtRecent) 수집·가공 어댑터 �
 - Q5는 `tide.flatline_minutes`에 **상대적으로**(직전 / 직후) 짠다. 값을 채우지 않는다
 - 관련 검사(다른 skill 소유): Q1(R3)·Q2(R4) — `common-core` / 7.3b `값 멈춤`·`커버리지 밖` 전달 — `evaluation` / Q7(IDW 입력 필터) — `interpolation`
 
-픽스처 출처 (A.7절): F11은 `$SRC_IDW/output/`의 `observations.csv`(dtRecent 90일, 약 280MB) — 원문이 아니라 가공 CSV다. 저장소에는 경로 참조와 해시만 둔다
+픽스처 출처 (A.7절): F11은 `$SRC_IDW/output/`의 `observations.csv`(dtRecent 90일, 약 280MB) — 원문이 아니라 가공 CSV다. 저장소에는 경로 참조와 해시만 둔다. 이 CSV는 **IDW 보간 입력 전용**이라 `water_temp`·`salinity` 두 지표만 있다 — `tide_level`·`wind_speed`·`air_temp`는 없다(6.2절)
+
+F11 `DT_0061` 기대값(7.1절, 개정 11): 염분 **정상값(비0·비결측) 사이 최장 간격 > `stale_threshold_hours.salinity_tide`** — 임계 상대. 확인된 구간 2026-07-05 518분, 2026-08-01~08-04 2,881분
 
 ---
 

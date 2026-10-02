@@ -11,11 +11,11 @@ import sys
 import uuid
 from datetime import date, datetime, timezone
 
-from common.config import load_definitions, load_env_config
+from common.config import database_url, load_definitions
 from common.farm_sites import load_farm_sites, FarmSite
 from common.queue import Message, Queue
 
-from ._chlorophyll import find_chlorophyll_obs
+from ._chlorophyll import SURFACE_LAYER as CHL_SURFACE_LAYER, find_chlorophyll_obs
 from ._do import find_do_obs
 from ._nearest import find_nearest_obs, is_alertable_obs
 from ._red_tide import find_red_tide_reading
@@ -40,12 +40,27 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _iso_utc(v) -> str:
+    """source_ref 시각 표기 — UTC ISO `YYYY-MM-DDTHH:MM:SS` (5.5절). DB 값(datetime)·문자열 모두"""
+    if isinstance(v, datetime):
+        return v.strftime("%Y-%m-%dT%H:%M:%S")
+    return str(v or "").replace(" ", "T")
+
+
 def _is_pending(val: object) -> bool:
     return val is None or str(val).strip() in ("<미결>", "")
 
 
 def _grading_cfg(defs: dict) -> dict:
     return defs.get("grading", {})
+
+
+def _p95_thresholds(g_cfg: dict) -> list:
+    """판정 정의 grading.p95_thresholds.water_temp — 없으면 멈춘다. 코드 기본값으로 대체하지 않는다 (2.0.6절)"""
+    th = (g_cfg.get("p95_thresholds") or {}).get("water_temp")
+    if not th:
+        raise RuntimeError("판정 정의 grading.p95_thresholds.water_temp 없음 — 코드 기본값으로 대체하지 않는다")
+    return th
 
 
 def _bulletin_cfg(defs: dict) -> dict:
@@ -60,6 +75,15 @@ def _line_cfg(defs: dict) -> dict:
 # obs.loaded 처리 — 인근 실측 + DO + 클로로필 + 적조
 # ─────────────────────────────────────────────────────────────────────────────
 
+def is_estuary_station(station_id: str, estuary_stations: list) -> bool:
+    """
+    하구 영향 조위관측소인가 (grading.estuary_stations, 4.8절).
+    목록 값은 tide.stations와 같은 관측소 코드(DT_xxxx), station_id는 "tide:DT_xxxx" — 원천 접두어를 떼고 대조한다
+    """
+    code = station_id.split(":", 1)[1] if ":" in station_id else station_id
+    return code in set(estuary_stations)
+
+
 def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
     """
     obs.loaded → 물때·풍속·기온·염분·DO·클로로필·적조 축 갱신.
@@ -72,8 +96,9 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
     b_cfg = _bulletin_cfg(defs)
     l_cfg = _line_cfg(defs)
 
-    wt_thresholds = g_cfg.get("p95_thresholds", {}).get("water_temp", [1.0, 2.0, 3.0])
-    salinity_mode = g_cfg.get("salinity_mode")  # <미결> 허용
+    wt_thresholds = _p95_thresholds(g_cfg)
+    salinity_mode = g_cfg.get("salinity_mode")
+    estuary_stations: list = g_cfg.get("estuary_stations") or []
     excluded_zones = g_cfg.get("excluded_zones")
     line_max_km = g_cfg.get("line_max_distance_km")
     fishery_max_km = g_cfg.get("fishery_max_distance_km")
@@ -91,7 +116,7 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
         obs_by_metric[axis] = repo.get_latest_observations_by_metric(axis)
 
     line_surface_obs = repo.get_latest_line_surface_obs("dissolved_oxygen")
-    survey_obs = repo.get_latest_survey_obs("chlorophyll", "CHL_S")
+    survey_obs = repo.get_latest_survey_obs("chlorophyll", CHL_SURFACE_LAYER)
 
     areas = repo.get_areas()
     bulletins_raw = repo.get_bulletins_in_window(today, current_window_days if not _is_pending(current_window_days) else 0)
@@ -161,9 +186,14 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
                 none_reason = "SALINITY_MODE_NONE"
                 alertable = False
             elif salinity_mode == "NEAREST_TIDE":
-                prov = "NEAREST"
-                none_reason = None
-                alertable = is_alertable_obs(nearest_sal)
+                if is_estuary_station(nearest_sal["station_id"], estuary_stations):
+                    prov = "NONE"
+                    none_reason = "EXCLUDED_ZONE"
+                    alertable = False
+                else:
+                    prov = "NEAREST"
+                    none_reason = None
+                    alertable = is_alertable_obs(nearest_sal)
             else:  # NONE
                 prov = "NONE"
                 none_reason = "SALINITY_MODE_NONE"
@@ -203,7 +233,7 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
                 do_row = _make_none_row(farm.farm_id, "dissolved_oxygen", now, "NO_INPUT",
                                         derivation="SURVEY")
             else:
-                src = f"{do_obs['station_id']}@{do_obs.get('observed_at_utc') or do_obs.get('surveyed_on', '')}"
+                src = f"{do_obs['station_id']}@{_iso_utc(do_obs.get('observed_at_utc'))}"
                 do_row = {
                     "farm_id": farm.farm_id,
                     "axis": "dissolved_oxygen",
@@ -233,8 +263,7 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
             chl_row = _make_none_row(farm.farm_id, "chlorophyll", now, "NO_INPUT",
                                      derivation="SURVEY")
         else:
-            surveyed_on = chl_obs.get("surveyed_on", "")
-            src = f"{chl_obs['station_id']}@{surveyed_on}"
+            src = f"{chl_obs['station_id']}@{_iso_utc(chl_obs.get('observed_at_utc'))}"   # 조사 시각 (5.5절, 개정 14)
             chl_row = {
                 "farm_id": farm.farm_id,
                 "axis": "chlorophyll",
@@ -250,7 +279,7 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
                 "alertable": False,
                 "source_ref": src,
                 "distance_km": chl_obs["distance_km"],
-                "observed_at_utc": None,
+                "observed_at_utc": chl_obs.get("observed_at_utc"),   # 조사 시각 — 모니터링 시간축 (개정 14)
                 "computed_at_utc": now,
             }
         readings.append(chl_row)
@@ -308,15 +337,13 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
         repo.upsert_farm_readings(readings)
         repo.upsert_farm_reading_history(history)
 
+    # 갱신한 축마다 grade.done 하나 — evaluation은 axis 하나씩 판정한다 (2.2절, queue-v1 grade_done)
     grade_run_id = str(uuid.uuid4())
-    queue.publish(Message(
-        topic="grade.done",
-        payload={
-            "grade_run_id": grade_run_id,
-            "axis": "obs.loaded",
-            "farm_ids": farm_ids,
-        },
-    ))
+    by_axis: dict[str, list[str]] = {}
+    for r in readings:
+        by_axis.setdefault(r["axis"], []).append(r["farm_id"])
+    for axis, ids in by_axis.items():
+        _publish_grade_done(queue, grade_run_id, axis, ids)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -336,7 +363,7 @@ def handle_interp_done(payload: dict, repo, queue: Queue, defs: dict) -> None:
 
     now = _utcnow()
     g_cfg = _grading_cfg(defs)
-    thresholds = g_cfg.get("p95_thresholds", {}).get("water_temp", [1.0, 2.0, 3.0])
+    thresholds = _p95_thresholds(g_cfg)
     excluded_zones = g_cfg.get("excluded_zones")
 
     run = repo.get_interpolation_run(run_id)
@@ -422,20 +449,26 @@ def handle_interp_done(payload: dict, repo, queue: Queue, defs: dict) -> None:
         repo.upsert_farm_readings(readings)
         repo.upsert_farm_reading_history(history)
 
-    grade_run_id = str(uuid.uuid4())
-    queue.publish(Message(
-        topic="grade.done",
-        payload={
-            "grade_run_id": grade_run_id,
-            "axis": "water_temp",
-            "farm_ids": farm_ids,
-        },
-    ))
+    _publish_grade_done(queue, str(uuid.uuid4()), "water_temp", farm_ids)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 헬퍼
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _publish_grade_done(queue: Queue, grade_run_id: str, axis: str, farm_ids: list[str]) -> None:
+    """grade.done — 계약 queue-v1 grade_done (schema·topic·grade_run_id·axis·farm_ids)"""
+    queue.publish(Message(
+        topic="grade.done",
+        payload={
+            "schema": "queue-v1",
+            "topic": "grade.done",
+            "grade_run_id": grade_run_id,
+            "axis": axis,
+            "farm_ids": sorted(set(farm_ids)),
+        },
+    ))
+
 
 def _make_none_row(
     farm_id: str,
@@ -472,8 +505,7 @@ def main(argv: list[str] | None = None) -> None:
     from sqlalchemy import create_engine
     from common.repository import SqlRepository
 
-    env = load_env_config()
-    engine = create_engine(env.database_url)
+    engine = create_engine(database_url())
     repo = SqlRepository(engine)
     repo.check_schema()
 

@@ -129,7 +129,7 @@ def test_ok_with_items():
 
 
 def test_ok_empty_total_count_zero():
-    """totalCount=0, items 없음 → OK (정상적 침묵)"""
+    """totalCount=0, items 없음 → OK_EMPTY (정상적 침묵, CLAUDE.md 6절 00+0행)"""
     body = json.dumps({
         "response": {
             "header": {"resultCode": "00"},
@@ -137,7 +137,7 @@ def test_ok_empty_total_count_zero():
         }
     })
     pr = parse(body)
-    assert pr.parse_status == "OK"
+    assert pr.parse_status == "OK_EMPTY"
     assert pr.total_count == 0
     assert pr.items == []
 

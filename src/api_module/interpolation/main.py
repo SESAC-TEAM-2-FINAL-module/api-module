@@ -10,7 +10,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 
-from common.config import load_definitions, load_env_config
+from common.config import database_url, load_definitions
 from common.farm_sites import load_farm_sites
 from common.queue import Message, Queue
 
@@ -27,6 +27,13 @@ def _utcnow() -> datetime:
 
 def _interp_cfg(defs: dict) -> dict:
     return defs.get("interpolation", {})
+
+
+def _req(cfg: dict, key: str):
+    """판정 정의 interpolation.<key> — 없으면 멈춘다. 코드 기본값으로 대체하지 않는다 (2.0.6절)"""
+    if cfg.get(key) is None:
+        raise RuntimeError(f"판정 정의 interpolation.{key} 없음 — 코드 기본값으로 대체하지 않는다")
+    return cfg[key]
 
 
 def _station_set_key(station_ids: list[str]) -> str:
@@ -60,8 +67,8 @@ def _get_or_compute_error(repo, station_set_key: str, metric: str,
     obs = repo.get_observations_for_loocv(metric, window_days)
     p95, mae, n_samples = compute_loocv(
         obs, station_coords,
-        power_p=float(cfg.get("power_p", 2)),
-        n_neighbors=int(cfg.get("n_neighbors", 5)),
+        power_p=float(_req(cfg, "power_p")),
+        n_neighbors=int(_req(cfg, "n_neighbors")),
     )
 
     repo.upsert_interpolation_error([{
@@ -82,11 +89,11 @@ def _get_or_compute_error(repo, station_set_key: str, metric: str,
 
 def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
     """
-    obs.loaded 처리 — network=tide인 경우만.
+    obs.loaded 처리 — source=tide(조위관측소 적재)인 경우만 (queue-v1, 2.2절).
     IDW → 가중치 기록 → 오차 조회/산출 → 적재 → interp.done 발행.
     멱등: (load_id, metric) 고유 제약이 같은 알림을 막는다.
     """
-    if payload.get("network") != "tide":
+    if payload.get("source") != "tide":
         return
 
     load_id = payload.get("load_id")
@@ -99,9 +106,9 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
     metric = "water_temp"
 
     cfg = _interp_cfg(defs)
-    align_window_min = int(cfg.get("align_window_min", 30))
-    power_p = float(cfg.get("power_p", 2))
-    n_neighbors = int(cfg.get("n_neighbors", 5))
+    align_window_min = int(_req(cfg, "align_window_min"))
+    power_p = float(_req(cfg, "power_p"))
+    n_neighbors = int(_req(cfg, "n_neighbors"))
     exclude_flatline = None if _is_pending(cfg.get("exclude_flatline")) else cfg.get("exclude_flatline")
 
     # 관측 및 관측소 좌표 조회
@@ -157,7 +164,7 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
             "run_id": run_id,
             "load_id": load_id,
             "metric": metric,
-            "method": cfg.get("method", "M2"),
+            "method": _req(cfg, "method"),
             "power_p": power_p,
             "n_neighbors": n_neighbors,
             "ref_time_utc": ref_time,
@@ -221,8 +228,8 @@ def run_interpolation_error(repo, defs: dict) -> None:
 
         p95, mae, n_samples = compute_loocv(
             subset_obs, subset_coords,
-            power_p=float(cfg.get("power_p", 2)),
-            n_neighbors=int(cfg.get("n_neighbors", 5)),
+            power_p=float(_req(cfg, "power_p")),
+            n_neighbors=int(_req(cfg, "n_neighbors")),
         )
 
         repo.upsert_interpolation_error([{
@@ -245,15 +252,15 @@ def main(argv: list[str] | None = None) -> None:
     from sqlalchemy import create_engine
     from common.repository import SqlRepository
 
-    env = load_env_config()
-    engine = create_engine(env.database_url)
+    engine = create_engine(database_url())
     repo = SqlRepository(engine)
     repo.check_schema()
 
     defs = load_definitions()
 
     args = argv or sys.argv[1:]
-    if args and args[0] == "interpolation-error":
+    # "error"는 인계 매니페스트(handoff/k8s/interpolation.yaml)의 CronJob 명령
+    if args and args[0] in ("interpolation-error", "error"):
         run_interpolation_error(repo, defs)
     else:
         from common.queue import MemoryQueue

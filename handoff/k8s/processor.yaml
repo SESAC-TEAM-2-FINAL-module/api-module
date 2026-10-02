@@ -1,0 +1,108 @@
+# processor Deployment + reprocess Job — 계획서 2.1절
+# 역할: raw.fetched 소비 → 해석·정규화·품질·적재 → obs.loaded
+# KEDA ScaledObject 추가는 인프라가 결정
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: processor
+  namespace: aquasentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: processor
+  template:
+    metadata:
+      labels:
+        app: processor
+    spec:
+      containers:
+        - name: processor
+          image: ${REGISTRY}/api-module/processor:latest
+          command: ["python", "-m", "processor.main"]
+          envFrom:
+            - secretRef:
+                name: api-module-secrets
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: api-module-secrets
+                  key: DATABASE_URL
+            # RAW_STORE_DSN — 객체 저장소 구현 이미지와 함께 켠다(계획서 11절 미결). 현재 이미지는 이 값이 있으면 기동을 멈춘다
+            # - name: RAW_STORE_DSN
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: api-module-secrets
+            #       key: RAW_STORE_DSN
+            - name: QUEUE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: api-module-secrets
+                  key: QUEUE_DSN
+            - name: OPERATIONAL_CONFIG_PATH
+              value: /config/operational.yaml
+          volumeMounts:
+            - name: operational-config
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+      volumes:
+        - name: operational-config
+          configMap:
+            name: api-module-operational
+---
+# reprocess Job — 원문 ID 범위 재처리 (파서 수정 후 수동 실행)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: reprocess
+  namespace: aquasentinel
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: reprocess
+          image: ${REGISTRY}/api-module/processor:latest
+          command: ["python", "-m", "processor.main", "reprocess"]
+          # args: ["--raw-id-from", "xxx", "--raw-id-to", "yyy"]  인프라가 설정
+          envFrom:
+            - secretRef:
+                name: api-module-secrets
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: api-module-secrets
+                  key: DATABASE_URL
+            # RAW_STORE_DSN — 객체 저장소 구현 이미지와 함께 켠다(계획서 11절 미결). 현재 이미지는 이 값이 있으면 기동을 멈춘다
+            # - name: RAW_STORE_DSN
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: api-module-secrets
+            #       key: RAW_STORE_DSN
+            - name: OPERATIONAL_CONFIG_PATH
+              value: /config/operational.yaml
+          volumeMounts:
+            - name: operational-config
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "1Gi"
+      volumes:
+        - name: operational-config
+          configMap:
+            name: api-module-operational

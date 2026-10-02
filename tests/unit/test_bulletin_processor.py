@@ -298,10 +298,11 @@ class TestNormalizeTxtSeas:
         """'해역(내측)' 제거."""
         assert _normalize_txt_seas_1_3("충남 서산 창리 해역(내측)", {}) == "충남 서산 창리"
 
-    def test_alias_applied(self):
-        aliases = {"충천남도 천수만 해역": "충남천수만"}
+    def test_alias_not_applied_in_normalize(self):
+        """aliases는 post-split area_id 조회에만 쓴다 — normalize 단계는 치환하지 않는다."""
+        aliases = {"충천남도 천수만": "충남_chunnam"}
         result = _normalize_txt_seas_1_3("충천남도 천수만 해역", aliases)
-        assert result == "충남천수만"
+        assert result == "충천남도 천수만"
 
     def test_no_change_needed(self):
         assert _normalize_txt_seas_1_3("전남 여수", {}) == "전남 여수"

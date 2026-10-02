@@ -1,0 +1,77 @@
+# interpolation Deployment + interpolation-error CronJob — 계획서 2.1절
+# 역할: obs.loaded(조위) 소비 → IDW 추정·오차 → 적재 → interp.done
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interpolation
+  namespace: aquasentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: interpolation
+  template:
+    metadata:
+      labels:
+        app: interpolation
+    spec:
+      containers:
+        - name: interpolation
+          image: ${REGISTRY}/api-module/interpolation:latest
+          command: ["python", "-m", "interpolation.main"]
+          envFrom:
+            - secretRef:
+                name: api-module-secrets
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: api-module-secrets
+                  key: DATABASE_URL
+            - name: QUEUE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: api-module-secrets
+                  key: QUEUE_DSN
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "1Gi"
+---
+# interpolation-error CronJob — 오늘의 오차 1일 1회 산출 (제안 — 계획서 2.1절)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: interpolation-error
+  namespace: aquasentinel
+spec:
+  schedule: "0 1 * * *"             # 1일 1회 새벽 1시 (UTC)
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: interpolation-error
+              image: ${REGISTRY}/api-module/interpolation:latest
+              command: ["python", "-m", "interpolation.main", "error"]
+              envFrom:
+                - secretRef:
+                    name: api-module-secrets
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-module-secrets
+                      key: DATABASE_URL
+              resources:
+                requests:
+                  cpu: "500m"
+                  memory: "512Mi"
+                limits:
+                  cpu: "2000m"
+                  memory: "1Gi"

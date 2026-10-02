@@ -319,3 +319,21 @@ class TestN11ComputedNotAlertable:
         row = _make_none_row("FARM-1", "water_temp", now, "NO_INPUT", derivation="COMPUTED")
         assert row["derivation"] == "COMPUTED"
         assert row["alertable"] is False
+
+
+# ── 하구 영향 관측소 (grading.estuary_stations, 4.8절) ────────────────────────
+
+def test_estuary_station_matches_prefixed_station_id():
+    """설정값은 관측소 코드(DT_0016), 관측 행 station_id는 tide:DT_0016 — 접두어를 떼고 대조"""
+    from grading.main import is_estuary_station
+    assert is_estuary_station("tide:DT_0016", ["DT_0016"])
+    assert not is_estuary_station("tide:DT_0014", ["DT_0016"])
+    assert not is_estuary_station("tide:DT_0016", [])
+
+
+def test_estuary_station_with_real_definitions():
+    from common.config import load_definitions
+    from grading.main import is_estuary_station
+    stations = load_definitions()["grading"]["estuary_stations"]
+    assert stations, "판정 정의 grading.estuary_stations가 비어 있다"
+    assert is_estuary_station(f"tide:{stations[0]}", stations)

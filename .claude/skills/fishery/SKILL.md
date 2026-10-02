@@ -58,7 +58,7 @@ description: "어장환경 해수면(femoSeaList) 수집·가공과 게시 감�
 | --- | --- | --- |
 | `collector-fishery-watch` | CronJob, 주 1회 | 올해 창 건수(사전 읽기)를 **직전 감시 원문의 메타 건수**와 비교 → 다르면 **같은 실행에서** 해당 연도 전량 호출. 이벤트를 받는 별도 워크로드는 없다 |
 | `collector-fishery-backfill` | Job, 1회 (수동) | 과거 연도 보관 — **올해 직전 연도부터 한 해씩 거슬러 올라가며**, 연속 2개 연도 0건이면 정지 |
-| `collector-completeness` | CronJob, 주 1회 | 같은 창을 월 분할로 수집(`tag = completeness`). 비교는 `common-core` |
+| `collector-completeness` | CronJob, 주 1회 | 같은 실행에서 단일 창 1회 + 월 분할(창 = **어제가 속한 해의 1월 1일 ~ KST 어제** — 1월 1일 실행이면 작년 한 해), 다 받으면 `completeness.collected`(3.3절, 개정 17). 비교·판정은 `common-core`(검사기) |
 
 - 단 **수집 범위를 정하는 사전 읽기**는 허용한다 — 결과 코드 존재 여부, `totalCount`(다음 페이지 요청), 어장환경 올해 창 건수(직전 감시 원문의 메타 건수와 비교해 전량 수집 여부). 사전 읽기 결과는 수집 범위에만 쓰고 **상태 판정·적재에는 쓰지 않는다.** 판정은 processor가 원문으로 다시 한다
 
@@ -69,10 +69,10 @@ description: "어장환경 해수면(femoSeaList) 수집·가공과 게시 감�
 
 | 테이블 | 핵심 컬럼 | 비고 |
 | --- | --- | --- |
-| `survey_observations` | `station_id`, `surveyed_on`, `layer`, `metric`, `value`, `raw_id` | PK (`station_id`, `surveyed_on`, `layer`, `metric`) |
+| `survey_observations` | `station_id`, `observed_at_utc`, `surveyed_on`, `layer`, `metric`, `value`, `missing_reason`, `flags`, `raw_id` | PK (`station_id`, `observed_at_utc`, `layer`, `metric`) — **조사 시각이 키**다(개정 14). 같은 날 여러 조사가 각각 남고, 모니터링의 시간축과 맞는다. `surveyed_on`(KST 조사일)은 조회용으로 남긴다. 원문의 완전 중복(같은 시각·같은 값)은 하나로 합쳐진다(7.7절 `loaded`). `flags`(JSON, nullable)는 R1·R2 `SENSOR_QUALITY` 저장용 — 다른 관측 테이블과 같은 형태(결정 D3) |
 | `publication_checks` | 4.5절 | PK `raw_id` — 감시 호출 한 번 = 원문 하나 = 기록 하나 |
 
-- 출력: `survey_observations(station_id, surveyed_on, layer('S'|'B'), metric, value)`
+- 출력: `survey_observations(station_id, observed_at_utc, surveyed_on, layer('S'|'B'), metric, value)` — `observed_at_utc` = `DATE_Y/M/D` + `TIME_H`·`TIME_I`(KST) → UTC(개정 14)
 - **metric은 3종** — `water_temp` · `salinity` · `chlorophyll`, 각각 층(`S` 표층 / `B` 저층)별. 쓰임이 정해진 것만 저장한다: 클로로필은 양식장 클로로필 칸(4.8절 — 표층 `CHL_S`)과 R2, 수온·염분은 R3·R1. pH·DO·COD·영양염은 저장하지 않는다 — 원문이 보관되므로 필요해지면 `reprocess`로 추가한다(정선관측 4.4절과 같은 원칙). 원문 필드명은 `CHL_S`·`CHL_B` 외에는 I-5에서 원문으로 확인한다
 - **게시 감시**: `publication_checks(axis, checked_at_utc, target_year, total_count, prev_total_count, delta, raw_id)`
   - 0건 → `publication_checks`에 기록. **게시 대기 판정은 `evaluation`이 이 기록으로 한다**(4.9절)
@@ -104,12 +104,12 @@ description: "어장환경 해수면(femoSeaList) 수집·가공과 게시 감�
 | **R7** 파싱 실패 (최우선) | 전부 | 알려진 응답 스키마 어디에도 맞지 않음, 결과 코드를 못 찾음·빈 값 (3.2절) | `PARSE_FAILURE` — 원문 보관, 검토 대상. "데이터 없음"으로 축약하지 않는다 |
 | **R0** 결측 | tide·line·fishery | 수온·염분·pH가 `0.000` / 수온·염분·DO가 모두 빈 문자열인 레코드 | 결측(`MISSING`) — 관측 건수·커버리지에서 제외, 행은 저장 |
 | **R1** 생물부착 의심 | line·fishery | 염분 < 31.0 psu (정상 32~33). **하구 예외**: 섬진강하구 등 하구 정점은 적용하지 않는다 | `SENSOR_QUALITY` |
-| **R2** 클로로필 급변 | fishery | 클로로필 > 10.0 이고 직전 대비 증가 > 5.0. **직전 = 같은 정점(`FISHERY` + `LOCATION_POINT`)·같은 층의 바로 이전 조사** | `SENSOR_QUALITY` (해조류 간섭 의심) |
+| **R2** 클로로필 급변 | fishery | 클로로필 > 10.0 이고 직전 대비 증가 > 5.0. **직전 = 같은 정점(`FISHERY` + `LOCATION_POINT`)·같은 층의 바로 이전 조사**(조사 시각 `observed_at_utc` 기준 — 개정 14) | `SENSOR_QUALITY` (해조류 간섭 의심) |
 | **R3** 물리 범위 | 전부 | 수온 < 0 또는 > 35 ℃ | `SENSOR_QUALITY` |
 | **R5** 침묵 | 전부 | 마지막 관측 이후 경과 > 축별 임계(4.9절 표). **적조는 예외 — 마지막 속보가 아니라 마지막 성공 호출 이후 경과**로 본다. 속보가 없는 것은 정상이고 호출 실패만 장애다(v1.5 7.3절 "이벤트성 — 호출 실패만 장애"). 클로로필은 임계 없이 게시 감시(4.5절) | `STALE` |
 
 - **R2(클로로필 급변)는 이 원천에만 적용된다** — 해조류 간섭 의심. 직전은 **같은 정점·같은 층의 바로 이전 조사**다. 이 어댑터는 비교에 필요한 정점 키·층·조사일을 정확히 넘겨야 한다
-- R1(생물부착)은 이 원천에도 적용된다 — 하구 정점 예외 목록은 미결(11절)
+- R1(생물부착)은 이 원천에도 적용된다 — 하구 정점 예외 목록은 판정 정의 `quality.r1_estuary_stations`(값 `<미결>`, 11절). 판정 정의 `grading.estuary_stations`는 조위관측소 염분 영역 판정용(4.8절)이라 이 목록이 아니다
 
 ---
 

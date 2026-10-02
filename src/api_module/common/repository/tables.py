@@ -15,7 +15,7 @@ from __future__ import annotations
 from sqlalchemy import (
     BigInteger, Boolean, CheckConstraint, Column, Date, DateTime,
     Double, Index, Integer, JSON, MetaData, String, Table,
-    UniqueConstraint, Identity,
+    UniqueConstraint, Identity, PrimaryKeyConstraint,
 )
 
 # MetaData 이름 규칙 — 64자 이하 보장 (MySQL 한계)
@@ -38,7 +38,7 @@ AXIS_VALS = (
 
 DERIVATION_VALS = ("COMPUTED", "MEASURED", "OFFICIAL", "SURVEY")
 
-PROVENANCE_VALS = ("NONE", "OBSERVED", "NEAREST", "INTERPOLATED", "OFFICIAL", "SURVEY")
+PROVENANCE_VALS = ("NONE", "OBSERVED", "NEAREST", "BASELINE", "INTERPOLATED", "OFFICIAL", "SURVEY")
 
 GRADE_VALS = ("NONE", "PRE_ADVISORY", "ADVISORY", "WARNING", "NOT_GRADED", "UNKNOWN")
 
@@ -150,16 +150,18 @@ Index("pk_line_obs", line_observations.c.station_id,
 survey_observations = Table(
     "survey_observations", metadata,
     Column("station_id", String(64), nullable=False),
-    Column("surveyed_on", Date, nullable=False),
+    Column("observed_at_utc", DateTime(), nullable=False),   # 조사 시각 — 키 (5.3절, 개정 14)
+    Column("surveyed_on", Date, nullable=False),            # KST 조사일 — 조회용
     Column("layer", String(4), nullable=False),
     Column("metric", String(64), nullable=False),
     Column("value", Double, nullable=True),
     Column("missing_reason", String(64), nullable=True),
+    Column("flags", JSON, nullable=True),          # R1·R2 SENSOR_QUALITY (5.3절, 결정 D3)
     Column("raw_id", BigInteger, nullable=True),
     CheckConstraint(_in("layer", LAYER_VALS), name="layer"),
 )
 Index("pk_survey_obs", survey_observations.c.station_id,
-      survey_observations.c.surveyed_on, survey_observations.c.layer,
+      survey_observations.c.observed_at_utc, survey_observations.c.layer,
       survey_observations.c.metric, unique=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -271,8 +273,35 @@ adapter_health = Table(
     Column("last_success_utc", DateTime(), nullable=True),
     Column("last_failure_utc", DateTime(), nullable=True),
     Column("consecutive_failures", Integer, nullable=False, default=0),
-    Column("retry_recovered", Boolean, nullable=False, default=False),
+    Column("retry_recovered", Integer, nullable=False, default=0),   # 복구 횟수 (5.3절, 결정 D4)
 )
+
+COMPLETENESS_STATUS_VALS = ("OK", "INCOMPLETE", "COMPARISON_RANGE_MISMATCH", "INVALID")
+COMPLETENESS_REASON_VALS = ("PART_STATUS", "FILTER_IGNORED", "WINDOW_MISMATCH", "RAW_MISSING")
+TRUNCATED_SIDE_VALS = ("SINGLE", "SPLIT")
+
+completeness_checks = Table(
+    # 분할 합산 결과 — 운영 기록, 결과 테이블 계약 밖 (3.3·5.3절, 개정 17). 검사기가 결과 한 행을 한 번에 쓴다
+    "completeness_checks", metadata,
+    Column("run_key", String(64), nullable=False),
+    Column("api", String(64), nullable=False),            # 기본 api_id
+    Column("window_start", Date, nullable=False),         # KST 날짜
+    Column("window_end", Date, nullable=False),
+    Column("parts", Integer, nullable=False),             # 월 분할 원문 수
+    Column("single_count", Integer, nullable=True),
+    Column("split_sum", Integer, nullable=True),
+    Column("truncated_side", String(16), nullable=True),
+    Column("status", String(32), nullable=False),
+    Column("reason", String(32), nullable=True),
+    Column("checked_at_utc", DateTime(), nullable=False),
+    PrimaryKeyConstraint("run_key", "api", name="pk_completeness_checks"),
+    CheckConstraint(_in("status", COMPLETENESS_STATUS_VALS), name="status"),
+    CheckConstraint(_in("reason", COMPLETENESS_REASON_VALS), name="reason"),
+    CheckConstraint(_in("truncated_side", TRUNCATED_SIDE_VALS), name="truncated_side"),
+)
+
+# 기동 시 테이블 검사에서 쓰는 이미지만 요구하는 표 (5.3절) — processor만
+OPTIONAL_TABLES = frozenset({"completeness_checks"})
 
 ops_events = Table(
     "ops_events", metadata,
@@ -359,6 +388,16 @@ farm_readings = Table(
     CheckConstraint(_in("grade", GRADE_VALS), name="grade"),
 )
 Index("pk_farm_readings", farm_readings.c.farm_id, farm_readings.c.axis, unique=True)
+
+farm_areas = Table(
+    # 양식장 해역 — 모듈이 정해 알린다 (1.6·4.9·5.3·5.5절, 개정 15). 웹 계약에 해역이 없다
+    "farm_areas", metadata,
+    Column("farm_id", String(64), primary_key=True),
+    Column("area_id", String(64), nullable=True),        # 반경 안 해역 없음 = NULL
+    Column("distance_km", Double, nullable=True),        # 해역 중심까지
+    Column("rule", String(64), nullable=False),          # 판정 규칙 이름 — NEAREST_CENTER_WITHIN_RADIUS
+    Column("computed_at_utc", DateTime(), nullable=False),
+)
 
 farm_reading_history = Table(
     "farm_reading_history", metadata,

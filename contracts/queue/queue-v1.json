@@ -70,6 +70,35 @@
         "axes": {"type": "array", "items": {"type": "string"}},
         "updated_at_utc": {"type": "string"}
       }
+    },
+    "completeness_collected": {
+      "type": "object",
+      "description": "분할 합산 완료 알림 (계획서 2.2·3.3절, 개정 17) — 받은 것만, 건수·판정 없음. 새 주제 추가라 같은 버전",
+      "required": ["schema", "topic", "run_key", "api", "window_start", "window_end", "single_raw_id", "parts"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {"type": "string", "const": "queue-v1"},
+        "topic": {"type": "string", "const": "completeness.collected"},
+        "run_key": {"type": "string", "pattern": "^[0-9]{8}T[0-9]{6}$"},
+        "api": {"type": "string", "enum": ["redtideList", "sooList", "femoSeaList"]},
+        "window_start": {"type": "string", "pattern": "^[0-9]{8}$"},
+        "window_end": {"type": "string", "pattern": "^[0-9]{8}$"},
+        "single_raw_id": {"type": "string"},
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["start", "end", "raw_id"],
+            "additionalProperties": false,
+            "properties": {
+              "start": {"type": "string", "pattern": "^[0-9]{8}$"},
+              "end": {"type": "string", "pattern": "^[0-9]{8}$"},
+              "raw_id": {"type": "string"}
+            }
+          }
+        }
+      }
     }
   }
 }

@@ -82,20 +82,21 @@ description: "DB 접근 계층 — src/api_module/common/repository/(tables.py, 
 
 | 테이블 | 핵심 컬럼 | 비고 |
 | --- | --- | --- |
-| `raw_index` | `id`, `api`, `tag`, `storage_key`, `fetched_at_utc`, `http_status`, `body_sha256`, `body_bytes`, `precheck_code` | 본문은 객체 저장소. PK `id`, 고유 `storage_key` |
-| `ingest_runs` | `id`, `raw_id`, `parser_version`, `status`, `result_code`, `total_count`, `item_count`, `format`, `format_mismatch`, `processed_at_utc` | 재처리할 때마다 행 추가. PK `id`(대리 키), **고유 (`raw_id`, `parser_version`)** — 재처리는 파서를 고친 뒤 하므로 버전이 바뀐다. 같은 파서로 같은 원문을 다시 처리하면(중복 알림) 행을 늘리지 않는다 |
-| `stations` | `id`, `source_api`, `name`, `lat`, `lng`, `sea_area`, `active` | `source_api`는 `VARCHAR`+`CHECK`. PK `id` = **`원천:원천키`** — 원천마다 관측소 코드 체계가 달라 겹치지 않게 한다. 예: `tide:DT_0016`, `line:` + `gru_nam`·`sln_cde`·`sta_cde`를 `-`로 이은 값, `fishery:` + `FISHERY`·`LOCATION_POINT`를 `-`로 이은 값. 모든 `station_id` 열이 이 형식을 쓴다 |
+| `raw_index` | `id`, `api`, `tag`, `storage_key`, `fetched_at_utc`, `http_status`, `body_sha256`, `body_bytes`, `precheck_code` | 본문은 객체 저장소. PK `id`, 고유 `storage_key`. **processor가 원문 메타로 쓴다**(2.3절). `api`는 **api_id**(`dtRecent`·`redtideList`·`sooList`·`femoSeaList`, 변형은 접미 `-watch`·`-backfill`. `-completeness`는 원문 키에만 — `raw_index`에 들어가지 않는다) — 수집 원천과의 대응은 `common/`의 대응표 한 곳(결정 D2) |
+| `ingest_runs` | `id`, `raw_id`, `parser_version`, `status`, `result_code`, `total_count`, `item_count`, `format`, `format_mismatch`, `processed_at_utc` | `status`는 **응답 상태**(3.2절 — `OK`·`OK_EMPTY`·`PARSE_FAILURE` 등, 결정 D6). 재처리할 때마다 행 추가. PK `id`(대리 키), **고유 (`raw_id`, `parser_version`)** — 재처리는 파서를 고친 뒤 하므로 버전이 바뀐다. 같은 파서로 같은 원문을 다시 처리하면(중복 알림) 행을 늘리지 않는다 |
+| `stations` | `id`, `source_api`, `name`, `lat`, `lng`, `sea_area`, `active` | **processor가 원문의 좌표로 upsert**한다(결정 D5 — 조위 위경도, 정선 십진도, 어장환경 도분초 변환). `active`는 `STATION_INACTIVE`(4.1절)로 갱신. `source_api`는 `VARCHAR`+`CHECK`. PK `id` = **`원천:원천키`** — 원천마다 관측소 코드 체계가 달라 겹치지 않게 한다. 예: `tide:DT_0016`, `line:` + `gru_nam`·`sln_cde`·`sta_cde`를 `-`로 이은 값, `fishery:` + `FISHERY`·`LOCATION_POINT`를 `-`로 이은 값. 모든 `station_id` 열이 이 형식을 쓴다 |
 | `observations` | `station_id`, `observed_at_utc`, `metric`, `value`(nullable), `missing_reason`, `flags`, `raw_id` | PK (`station_id`, `observed_at_utc`, `metric`) |
 | `line_observations` | 위 + `depth_m`, `cast_id`, `cast_rule_version`, `group_type` | PK에 `depth_m` 포함. 표층 표시 열은 두지 않는다 — 표층은 `grading`이 `line.surface_rule`과 `depth_m`으로 판별(4.4절) |
-| `survey_observations` | `station_id`, `surveyed_on`, `layer`, `metric`, `value`, `raw_id` | PK (`station_id`, `surveyed_on`, `layer`, `metric`) |
+| `survey_observations` | `station_id`, `observed_at_utc`, `surveyed_on`, `layer`, `metric`, `value`, `missing_reason`, `flags`, `raw_id` | PK (`station_id`, `observed_at_utc`, `layer`, `metric`) — **조사 시각이 키**다(개정 14). 같은 날 여러 조사가 각각 남고, 모니터링의 시간축과 맞는다. `surveyed_on`(KST 조사일)은 조회용으로 남긴다. 원문의 완전 중복(같은 시각·같은 값)은 하나로 합쳐진다(7.7절 `loaded`). `flags`(JSON, nullable)는 R1·R2 `SENSOR_QUALITY` 저장용 — 다른 관측 테이블과 같은 형태(결정 D3) |
 | `bulletins` | `cod_news`(PK), `day_report`, `detail_count`, `grade`(nullable), `raw_id` | `item2` 없는 속보도 1행. `grade`는 **`item2` 없는 속보에만** 채운다(`UNKNOWN`, 4.2절). 나머지는 `bulletin_details.grade` |
 | `bulletin_details` | `cod_news`, `seq`, `nam_biology`, `species_class`, `txt_seas_raw`, `txt_seas_key`, `min/max_density`, `grade` | `grade`는 `NOT_GRADED`·`UNKNOWN` 포함. `species_class`는 `TARGET`/`NON_TARGET`/`MISSING`(4.2절). `txt_seas_key`는 분리 전 정규화 문자열(4.3절). PK (`cod_news`, `seq`) |
 | `bulletin_detail_areas` | `cod_news`, `seq`, `part_no`, `area_key`, `area_id`(nullable) | 4.3절 4~5단계로 나뉜 **지점마다 1행**. PK (`cod_news`, `seq`, `part_no`). `area_id`는 별칭으로 해역이 정해진 경우만 — 비면 `unmapped_locations`에도 있다 |
 | `unmapped_locations` | `area_key`(PK), `kind`, `raw_sample`, `occurrence_count`, `first_seen_utc`, `last_seen_utc`, `resolved_at_utc`(nullable) | 검토 큐(4.3절). `kind`는 `PARSE_FAILED`/`OUT_OF_SCOPE` — 코드 상수로 검사 |
 | `area_aliases` | `alias_key`, `area_id`, `source` | 정규화 별칭 테이블. PK `alias_key` — 별칭 하나는 해역 하나로 간다. 광역 해역은 `areas`에 그 자체로 한 행 |
 | `publication_checks` | 4.5절 | PK `raw_id` — 감시 호출 한 번 = 원문 하나 = 기록 하나 |
-| `adapter_health` | `adapter`, `last_success_utc`, `last_failure_utc`, `consecutive_failures`, `retry_recovered` | `processor`가 원문을 해석한 뒤 기록한다. 갱신 규칙은 4.9절. PK `adapter` |
+| `adapter_health` | `adapter`, `last_success_utc`, `last_failure_utc`, `consecutive_failures`, `retry_recovered` | `processor`가 원문을 해석한 뒤 기록한다. 갱신 규칙은 4.9절. PK `adapter` = 수집 원천(결정 D2). `retry_recovered`는 **정수(복구 횟수)** — 7.8절 Q6 "1 증가", v1.5 12절 "별도 카운터"(결정 D4) |
 | `ops_events` | `id`, `event_type`, `api`, `detail(JSON)`, `occurred_at_utc` | `CAST_RULE_ASSUMPTION_BROKEN` 등. PK `id`(대리 키), **고유 키 없음** — 운영 이벤트 로그라 쌓이는 것이 정상이다. 중복 알림으로 같은 이벤트가 두 번 기록될 수 있고, 로그이므로 허용한다 |
+| `completeness_checks` | `run_key`, `api`, `window_start`, `window_end`, `parts`, `single_count`, `split_sum`, `truncated_side`, `status`, `reason`, `checked_at_utc` | 분할 합산 결과 — **운영 기록**(결과 테이블 계약 밖). PK (`run_key`, `api`). `status`·`reason`·`truncated_side`는 `VARCHAR`+`CHECK`. 기동 시 검사에서 **processor만** 요구한다(`OPTIONAL_TABLES`, `check_schema(include=…)`) (개정 17) |
 | `areas` | `area_id`, `name`, `center_lat`, `center_lng`, `radius_km` | 적조 해역 → 양식장 대응 기준 (시드). PK `area_id` |
 | `axis_coverage` | `area_id`, `axis`, `covered`, `season_months`, `reason` | 커버리지 밖·계절 밖 **선언** (시드). v1.5 13절 `zone_axis_coverage` 대응. 4.9절. PK (`area_id`, `axis`). **`season_months`가 계절 밖 판정의 유일한 원천**이다 |
 | `interpolation_runs` | `run_id`, `load_id`, `metric`, `method`, `power_p`, `n_neighbors`, `ref_time_utc`, `station_set_key`, `error_p95`, `error_window_days`, `computed_at_utc` | 4.7절. `station_set_key` = 사용 관측소 `station_id`를 **정렬해 `,`로 이은 값**(예: `tide:DT_0014,tide:DT_0016`). PK `run_id`, **고유 (`load_id`, `metric`)** — 적재 한 번·항목 하나에 IDW 한 번. 같은 `obs.loaded`가 두 번 와도 같은 행 |
@@ -109,6 +110,7 @@ description: "DB 접근 계층 — src/api_module/common/repository/(tables.py, 
 | `farm_readings` | `farm_id`, `axis`, `value`, `lower`, `upper`, `unit`, `derivation`, `provenance`, `none_reason`(nullable), `validated_scope`(nullable), `grade`(nullable — 적조만), `alertable`, `source_ref`, `distance_km`, `observed_at_utc`, `computed_at_utc` | 현재값. PK (`farm_id`, `axis`). **`provenance = NONE`이어도 계산된 값은 비우지 않는다**(4.8절). `none_reason`은 `evaluation`의 입력 — 화면 사유는 `axis_status.reason` |
 | `farm_reading_history` | 위 + `ts_utc` | 곡선용 시계열. 보존 기간 미결(11절). PK (`farm_id`, `axis`, `ts_utc`) |
 | `axis_status` | `farm_id`, `axis`, `state`, `reason`, `basis_utc`, `last_checked_utc` | 4.9절 쓰기 규칙. PK (`farm_id`, `axis`). `state`는 4.9절 상태 값 17종 — `VARCHAR` + `CHECK` |
+| `farm_areas` | `farm_id`, `area_id`(nullable), `distance_km`, `rule`, `computed_at_utc` | **모듈이 정한 양식장 해역**(1.6절, 개정 15). PK `farm_id`. `area_id`가 비면 반경 안 해역 없음. `rule` = `NEAREST_CENTER_WITHIN_RADIUS`. `evaluation`이 판정할 때마다 쓴다 |
 | `bulletins` · `bulletin_details` · `bulletin_detail_areas` | 위 표와 같음 | 적조 속보 원천. **해역 없는 속보**는 여기에만 있다(4.8절). 지점별 해역은 `bulletin_detail_areas` |
 | `interpolation_weights` · `interpolation_error` · `stations` | 위 표와 같음 | "근거 보기" — 사용 관측소·거리·가중치·오차 산출 기준 |
 
@@ -220,3 +222,7 @@ DB가 확정되지 않았다. 설계는 두 DB에 중립(5절)이고 **DDL 생�
 | 기동 시 테이블·계약 버전 검사의 실행, 원문 저장(객체 저장소), 큐, 설정 로딩 | `common-core` |
 | 각 테이블에 무엇을 쓰는가(정규화 규칙), `station_id` 값을 만드는 곳 | `tide`·`bulletin`·`line`·`fishery`·`interpolation`·`grading`·`evaluation` |
 | 결과 테이블의 의미 계약(5.5절) 배포 | `evaluation` |
+
+### MySQL "있으면 그대로" 업서트 (2026-10-01 수정)
+
+- `upsert(update_cols=[])`는 PostgreSQL `ON CONFLICT DO NOTHING`, MySQL은 **키 열을 자기 값으로 두는 무변경 `ON DUPLICATE KEY UPDATE`** — 일반 INSERT로 두면 중복에서 오류가 나고, `INSERT IGNORE`는 CHECK 위반까지 경고로 삼킨다. 한 문장의 바인드 매개변수는 6만 단위로 나눠 보낸다(PostgreSQL·MySQL 한도 65,535)

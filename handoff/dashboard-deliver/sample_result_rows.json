@@ -1,0 +1,347 @@
+{
+  "_notes": {
+    "origin": "API 모듈 코드·테스트 기반 예시 데이터 (실 DB 덤프 아님)",
+    "farm_sites": "farm_sites 테이블은 웹 서비스 소유. 실제 farm_id·좌표 목록은 웹 서비스 DB에서 조회. farm_sites_format.csv는 컬럼 형식 참조용(합성 데이터 1건).",
+    "utc": "모든 시각 필드 (_utc 접미) 는 UTC naive DATETIME. 화면 표시 시 KST +9h 변환 필요.",
+    "dashboard_reads": "farm_readings, axis_status, farm_reading_history, bulletins, bulletin_details, bulletin_detail_areas, areas, axis_coverage (dashboard_contract.md W1~W8 참조)"
+  },
+
+  "farm_readings": [
+    {
+      "_desc": "수온 — OBSERVED (P95 오차 1.0℃ 이하, 관측소 기준 교차검증)",
+      "farm_id": "farm_001",
+      "axis": "water_temp",
+      "value": 22.3,
+      "lower": 21.5,
+      "upper": 23.1,
+      "unit": "°C",
+      "derivation": "COMPUTED",
+      "provenance": "OBSERVED",
+      "none_reason": null,
+      "validated_scope": "STATION_SITES",
+      "grade": null,
+      "alertable": false,
+      "source_ref": "run_abc123",
+      "distance_km": null,
+      "observed_at_utc": "2026-09-15T12:00:00",
+      "computed_at_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "수온 — NEAREST (P95 오차 1.0~2.0℃, 인근 실측 등급)",
+      "farm_id": "farm_001",
+      "axis": "water_temp",
+      "value": 21.8,
+      "lower": 20.3,
+      "upper": 23.3,
+      "unit": "°C",
+      "derivation": "COMPUTED",
+      "provenance": "NEAREST",
+      "none_reason": null,
+      "validated_scope": "STATION_SITES",
+      "grade": null,
+      "alertable": false,
+      "source_ref": "run_def456",
+      "distance_km": null,
+      "observed_at_utc": "2026-09-15T12:00:00",
+      "computed_at_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "수온 — NONE (P95 오차 한계 초과. 값은 저장 — provenance.NONE ≠ 값없음)",
+      "farm_id": "farm_001",
+      "axis": "water_temp",
+      "value": 19.2,
+      "lower": 15.8,
+      "upper": 22.6,
+      "unit": "°C",
+      "derivation": "COMPUTED",
+      "provenance": "NONE",
+      "none_reason": "ERROR_ABOVE_LIMIT",
+      "validated_scope": "STATION_SITES",
+      "grade": null,
+      "alertable": false,
+      "source_ref": "run_ghi789",
+      "distance_km": null,
+      "observed_at_utc": "2026-09-15T12:00:00",
+      "computed_at_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "염분 — OBSERVED",
+      "farm_id": "farm_001",
+      "axis": "salinity",
+      "value": 33.2,
+      "lower": null,
+      "upper": null,
+      "unit": "psu",
+      "derivation": "COMPUTED",
+      "provenance": "OBSERVED",
+      "none_reason": null,
+      "validated_scope": "STATION_SITES",
+      "grade": null,
+      "alertable": false,
+      "source_ref": "run_abc123",
+      "distance_km": null,
+      "observed_at_utc": "2026-09-15T12:00:00",
+      "computed_at_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "조위 — MEASURED (최근접 관측소 실측값)",
+      "farm_id": "farm_001",
+      "axis": "tide_level",
+      "value": 0.85,
+      "lower": null,
+      "upper": null,
+      "unit": "m",
+      "derivation": "MEASURED",
+      "provenance": "NEAREST",
+      "none_reason": null,
+      "validated_scope": null,
+      "grade": null,
+      "alertable": true,
+      "source_ref": "DT_0016",
+      "distance_km": 12.4,
+      "observed_at_utc": "2026-09-15T11:55:00",
+      "computed_at_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "풍속 — MEASURED (최근접 관측소 실측값)",
+      "farm_id": "farm_001",
+      "axis": "wind_speed",
+      "value": 3.2,
+      "lower": null,
+      "upper": null,
+      "unit": "m/s",
+      "derivation": "MEASURED",
+      "provenance": "NEAREST",
+      "none_reason": null,
+      "validated_scope": null,
+      "grade": null,
+      "alertable": true,
+      "source_ref": "DT_0016",
+      "distance_km": 12.4,
+      "observed_at_utc": "2026-09-15T11:55:00",
+      "computed_at_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "기온 — MEASURED (최근접 관측소 실측값)",
+      "farm_id": "farm_001",
+      "axis": "air_temp",
+      "value": 24.1,
+      "lower": null,
+      "upper": null,
+      "unit": "°C",
+      "derivation": "MEASURED",
+      "provenance": "NEAREST",
+      "none_reason": null,
+      "validated_scope": null,
+      "grade": null,
+      "alertable": true,
+      "source_ref": "DT_0016",
+      "distance_km": 12.4,
+      "observed_at_utc": "2026-09-15T11:55:00",
+      "computed_at_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "적조 — 정상적 침묵 (호출 성공, 속보 없음 → NONE 등급, value=null)",
+      "farm_id": "farm_001",
+      "axis": "red_tide",
+      "value": null,
+      "lower": null,
+      "upper": null,
+      "unit": null,
+      "derivation": "OFFICIAL",
+      "provenance": "OFFICIAL",
+      "none_reason": null,
+      "validated_scope": null,
+      "grade": "NONE",
+      "alertable": false,
+      "source_ref": null,
+      "distance_km": null,
+      "observed_at_utc": null,
+      "computed_at_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "적조 — 주의보 발령 (alertable=true — W5: axis_status.state=NORMAL일 때 발송 후보)",
+      "farm_id": "farm_002",
+      "axis": "red_tide",
+      "value": null,
+      "lower": null,
+      "upper": null,
+      "unit": null,
+      "derivation": "OFFICIAL",
+      "provenance": "OFFICIAL",
+      "none_reason": null,
+      "validated_scope": null,
+      "grade": "ADVISORY",
+      "alertable": true,
+      "source_ref": "20250924-002#1",
+      "distance_km": null,
+      "observed_at_utc": "2025-09-24T00:00:00",
+      "computed_at_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "DO — BASELINE (표층 규칙 결정 전. provenance=NONE이지만 value 저장)",
+      "farm_id": "farm_001",
+      "axis": "dissolved_oxygen",
+      "value": 7.2,
+      "lower": null,
+      "upper": null,
+      "unit": "mg/L",
+      "derivation": "SURVEY",
+      "provenance": "NONE",
+      "none_reason": "SURFACE_RULE_UNDECIDED",
+      "validated_scope": null,
+      "grade": null,
+      "alertable": false,
+      "source_ref": "DT_0016@2026-09-10",
+      "distance_km": 8.3,
+      "observed_at_utc": "2026-09-10T04:00:00",
+      "computed_at_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "클로로필 — BASELINE (어장환경 조사 최근 표층값)",
+      "farm_id": "farm_001",
+      "axis": "chlorophyll",
+      "value": 3.1,
+      "lower": null,
+      "upper": null,
+      "unit": "μg/L",
+      "derivation": "SURVEY",
+      "provenance": "BASELINE",
+      "none_reason": null,
+      "validated_scope": null,
+      "grade": null,
+      "alertable": false,
+      "source_ref": "DT_0016@2026-08-20",
+      "distance_km": 5.7,
+      "observed_at_utc": "2026-08-20T06:00:00",
+      "computed_at_utc": "2026-09-15T12:05:00"
+    }
+  ],
+
+  "axis_status": [
+    {
+      "_desc": "수온 — 정상",
+      "farm_id": "farm_001",
+      "axis": "water_temp",
+      "state": "NORMAL",
+      "reason": null,
+      "basis_utc": "2026-09-15T12:00:00",
+      "last_checked_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "수온 — 신선도 초과 (관측소 응답 없음)",
+      "farm_id": "farm_002",
+      "axis": "water_temp",
+      "state": "STALE",
+      "reason": "no_fresh_observation",
+      "basis_utc": "2026-09-14T06:00:00",
+      "last_checked_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "수온 — 추정 지연 (sweep 판정 — interpolation이 갱신 안 됨)",
+      "farm_id": "farm_003",
+      "axis": "water_temp",
+      "state": "INTERPOLATION_STALE",
+      "reason": "interp_not_refreshed",
+      "basis_utc": "2026-09-14T18:00:00",
+      "last_checked_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "적조 — 정상적 침묵 (호출 성공, 속보 없음)",
+      "farm_id": "farm_001",
+      "axis": "red_tide",
+      "state": "NORMAL_SILENCE",
+      "reason": null,
+      "basis_utc": "2026-09-15T12:00:00",
+      "last_checked_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "적조 — 계절 밖 (11월, season_months=[5~10])",
+      "farm_id": "farm_001",
+      "axis": "red_tide",
+      "state": "OUT_OF_SEASON",
+      "reason": "outside_season_months",
+      "basis_utc": null,
+      "last_checked_utc": "2026-11-01T00:05:00"
+    },
+    {
+      "_desc": "DO — 값 사용 불가 (표층 규칙 미결)",
+      "farm_id": "farm_001",
+      "axis": "dissolved_oxygen",
+      "state": "NOT_USABLE",
+      "reason": "SURFACE_RULE_UNDECIDED",
+      "basis_utc": "2026-09-10T04:00:00",
+      "last_checked_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "클로로필 — 게시 대기 (올해 어장환경 조사 미게시)",
+      "farm_id": "farm_001",
+      "axis": "chlorophyll",
+      "state": "PUBLICATION_PENDING",
+      "reason": "no_publication_check",
+      "basis_utc": null,
+      "last_checked_utc": "2026-09-15T12:05:00"
+    },
+    {
+      "_desc": "커버리지 밖 (axis_coverage 미선언 해역)",
+      "farm_id": "farm_004",
+      "axis": "red_tide",
+      "state": "OUT_OF_COVERAGE",
+      "reason": "axis_not_declared",
+      "basis_utc": null,
+      "last_checked_utc": "2026-09-15T12:05:00"
+    }
+  ],
+
+  "bulletins": [
+    {
+      "_desc": "속보 — 주의보 (item2 있음, 세부 1건)",
+      "cod_news": "20250924-002",
+      "day_report": "2025-09-24",
+      "detail_count": 1,
+      "grade": "ADVISORY",
+      "raw_id": 1790125808264
+    },
+    {
+      "_desc": "속보 — UNKNOWN (item2 없음, grade=UNKNOWN)",
+      "cod_news": "20250924-001",
+      "day_report": "2025-09-24",
+      "detail_count": 0,
+      "grade": "UNKNOWN",
+      "raw_id": 1790125808001
+    }
+  ],
+
+  "bulletin_details": [
+    {
+      "_desc": "세부 — Cochlodinium 주의보",
+      "cod_news": "20250924-002",
+      "seq": 1,
+      "nam_biology": "Cochlodinium polykrikoides",
+      "species_class": "TARGET",
+      "txt_seas_raw": "경남 통영 및 거제",
+      "txt_seas_key": "경남 통영",
+      "min_density": 100.0,
+      "max_density": 2500.0,
+      "grade": "ADVISORY"
+    }
+  ],
+
+  "bulletin_detail_areas": [
+    {
+      "_desc": "해역 분리 — txt_seas 및 분리 결과",
+      "cod_news": "20250924-002",
+      "seq": 1,
+      "part_no": 0,
+      "area_key": "경남 통영",
+      "area_id": "gyeongnam_tongyeong"
+    },
+    {
+      "cod_news": "20250924-002",
+      "seq": 1,
+      "part_no": 1,
+      "area_key": "경남 거제",
+      "area_id": "gyeongnam_geoje"
+    }
+  ]
+}

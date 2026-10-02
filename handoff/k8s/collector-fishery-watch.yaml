@@ -1,0 +1,41 @@
+# collector-fishery-watch CronJob — 계획서 2.1절
+# 역할: femoSeaList 올해 창 건수 감시 → 변화 시 같은 실행에서 전량 수집 → raw.fetched
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: collector-fishery-watch
+  namespace: aquasentinel
+spec:
+  schedule: "0 4 * * 1"             # 주 1회 월요일 새벽 4시 (UTC)
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: collector-fishery-watch
+              image: ${REGISTRY}/api-module/collector:latest
+              command: ["python", "-m", "collector.fishery_watch"]
+              envFrom:
+                - secretRef:
+                    name: api-module-secrets
+              env:
+                # RAW_STORE_DSN — 객체 저장소 구현 이미지와 함께 켠다(계획서 11절 미결). 현재 이미지는 이 값이 있으면 기동을 멈춘다
+                # - name: RAW_STORE_DSN
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: api-module-secrets
+                #       key: RAW_STORE_DSN
+                - name: QUEUE_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-module-secrets
+                      key: QUEUE_DSN
+              resources:
+                requests:
+                  cpu: "200m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "1000m"
+                  memory: "512Mi"

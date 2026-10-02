@@ -24,8 +24,9 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 | `common/metrics/` | 운영 지표 (③-13) |
 | `collector/main.py` | 수집 진입점 — 워크로드 명령마다 원천 어댑터를 부른다 (③-12) |
 | `processor/main.py` | 가공 진입점 — `process`·`reprocess` (③-12) |
+| `processor/_load.py`, `processor/_health.py` | 적재(`raw_index`·`ingest_runs`·관측·`stations`·`adapter_health`) · `adapter_health` 갱신 규칙 — I-12 (③-11·③-12) |
 | `processor/quality/` | 품질 규칙 R0~R7 (③-10) |
-| `processor/completeness/` | 완전성 검사 — `totalCount`·분할 합산·필터 수용 (③-4) |
+| `processor/completeness/` | 완전성 검사 — `totalCount`·분할 합산·필터 수용·적조 직전 원문 대조 (③-4) |
 | `contracts/inputs/farm_sites.md` | 양식장 좌표 입력 계약 (③-8) |
 | `contracts/queue/` | 단계 간 알림 메시지 스키마 (③-6) |
 
@@ -50,7 +51,7 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 
 | 규칙 | 근거 |
 | --- | --- |
-| 키는 **Decoding 키를 `params=`로.** URL 문자열 조립과 섞지 않는다 | Encoding/Decoding 혼용 시 깨짐 |
+| 키는 **Decoding 키를 `params=`로.** URL 문자열 조립과 섞지 않는다. 설정된 키가 URL 인코딩 형태(`%XX` — 포털의 Encoding 키를 복사한 경우)면 **디코딩해서** 쓴다. 이미 디코딩된 키에는 영향이 없다 | Encoding/Decoding 혼용 시 깨짐. `params=`는 `%`를 다시 인코딩(`%25`)해 키가 깨진다 — I-11 실수집에서 확인(`common/config/_env.py` `get_key()`) |
 | 키 파라미터 **대소문자는 서비스 명세 그대로** (`serviceKey` / `ServiceKey`) | 같은 기관 안에서도 다름 |
 | **값이 빈 선택 파라미터는 보내지 않는다** | `param=`이 필터로 해석되는 위험 |
 | 형식 파라미터명도 명세 그대로 (`type` / `_type` / `resultType` / `dataType`) | 서비스마다 다름 |
@@ -93,14 +94,17 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 
 | API 유형 | 검사 |
 | --- | --- |
-| `totalCount` 있음 (`dtRecent`) | 수령 건수 = `totalCount`. 다르면 `INCOMPLETE` |
-| `totalCount` 없음 (NIFS) | **주기적 분할 합산** — 주 1회, 같은 창을 월 분할로 받아 합이 같은지. **비교 범위를 먼저 일치시킨다** (범위가 달라 "절단 확정"이 거짓으로 나온 사례) |
+| `totalCount` 있음 (`dtRecent`) | 수령 건수 = `totalCount`. 다르면 `INCOMPLETE`. **`totalCount`는 관측 시점 수** — metric × station 행 수가 아니다. metric 분해 후 rows ≠ `totalCount`가 되는 이유이므로, 대조 단위를 수집 건수(시점 수)로 명시해 processor가 원문으로 재집계할 때도 같은 단위를 쓴다 |
+| `totalCount` 없음 (NIFS — 정선·어장환경) | **주기적 분할 합산** — 주 1회, 같은 창을 단일 창 1회 + 월 분할로 받아 건수가 같은지. **비교 범위를 먼저 일치시킨다**(빈틈·겹침 없이 덮는지). 처리 경로는 3.3절 "분할 합산 처리 경로"(개정 17) |
+| `totalCount` 없음 (NIFS — 적조) | **직전 원문 대조**(3.3절, 개정 18) — 아래 |
 | 필터 파라미터가 있는 API | 반환 행이 **요청 창 안인지** 확인. 창 밖 행이 섞이면 `FILTER_IGNORED` (공단 서비스가 모르는 파라미터를 무시하고 전 이력을 반환한 사례) |
 
 - 분류: `INCOMPLETE` → 파싱 실패와 같은 분류 *(제안)* / `FILTER_IGNORED` → 필터 무시 (v1.5 4.5절 v1.4 추가)
 
 - **분할 합산은 비교 전에 두 결과의 범위를 먼저 맞춘다.** 범위가 다르면 절단·`INCOMPLETE`로 판정하지 않고 운영 이벤트 `COMPARISON_RANGE_MISMATCH` + 검사 무효로 둔다(N12). 범위를 맞춘 뒤에도 합이 모자라면 `INCOMPLETE`(N13)
-- 분할 수집 원문은 `collector-completeness`(주 1회, `tag = completeness`)가 만든다(2.1절). 원천별 분할 수집 코드는 각 원천 skill 몫이고, **합산 비교는 여기** `processor/completeness/`가 한다
+- 분할 합산은 **완료 알림 방식**이다(3.3절, 개정 17): `collector-completeness`가 원천마다 같은 실행에서 **단일 창을 먼저 1회 + 같은 창의 월 분할**(창 끝 = KST 어제, 워크로드 시작 때 고정)을 받아 원문을 저장하고(**`raw.fetched`는 내지 않는다**), 원천을 마치면 `completeness.collected`(받은 원문 목록만). tag = `cmp_{실행 키}_single_…`/`cmp_{실행 키}_part_…`. 공용 수집 함수는 `collector/_completeness.py`. **판정은 검사기**(`processor.main completeness-check` — `completeness.collected` 컨슈머, KEDA 밖 1대, `processor/completeness/_split_check.py`)가 알림에 실린 원문을 **원문 저장소에서 직접 읽어 한 번에** 한다 — processor의 처리 결과를 기다리지 않는다. **processor는 분할 합산 원문을 받지 않는다** — `raw_index`·`ingest_runs`·`adapter_health`·관측 테이블 어디에도 들어가지 않는다(개정 17 보완). 판정: 비정상 원문·창 밖 행·창 불일치·원문 없음 → `INVALID`(`reason`), 빈틈·겹침 → `COMPARISON_RANGE_MISMATCH`, 건수가 다르면 **양방향** `INCOMPLETE`(`truncated_side` `SINGLE`=단일 창 쪽 절단 의심 / `SPLIT`). 결과 `completeness_checks` 한 행 — 같은 결과면 다시 쓰지 않고, `RAW_MISSING`은 판정이 난 행을 덮지 않는다. 운영 이벤트는 같은 트랜잭션, 지표는 커밋 뒤
+
+- **적조 직전 원문 대조**(3.3절, 개정 18 — 검수 1차 반영) — 비교는 `processor/completeness/`의 순수 함수, 호출은 `processor/_load.py` `load()`가 **첫 처리일 때 적재 트랜잭션 안에서**. 이번 응답 상태가 정상(`OK`·`OK_EMPTY`·`NO_DATA`)일 때만. **직전 원문은 원문 저장소 키 순서로 고른다**(`common/raw_store` 목록 조회) — `raw/redtideList/…`에서 이번 키보다 앞선 키 중 **정기 원문**(tag `{sdate}_{edate}`, 창 길이가 이번과 같음)이고 응답 상태가 정상(이번 원문과 같은 `response_status`)인 가장 늦은 것, 순서 = (`epoch_ms`, 키 문자열), 범위는 이번 날짜 폴더(UTC) + 앞 7일 = 폴더 8개. 실패 원문은 더 거슬러 가고, 메타·JSON 손상·읽기 예외만 `PREV_UNREADABLE` — 예외는 대조 안에서 잡아 적재를 실패시키지 않는다. DB 처리 상태(`raw_index`·`ingest_runs`·`bulletins`)를 쓰지 않는다 — 처리 순서에 따라 기준이 흔들려 중복·누락이 난다. 해석은 `classifier.parse`의 `pr.items`에서 `cod_news`·`day_report`만. 요청 창 = 원문 메타 `params.sdate`·`params.edate`(양끝 포함). 직전 원문 속보 중 `day_report`가 창 안인 `cod_news` − 이번 `cod_news` = 빠진 속보 → 운영 이벤트 `BULLETIN_WINDOW_MISSING` 한 건(detail: 두 원문 키, 창, 빠진 속보마다 `{cod_news, day_report, same_day_replaced}`) + 지표 `bulletin_window_missing_total`(커밋 뒤). 건너뛰면 `bulletin_window_check_skipped_total{reason=NO_PREV|PREV_UNREADABLE|NO_WINDOW}`. **응답 상태는 바꾸지 않고**(`INCOMPLETE` 아님) 축 상태에 반영하지 않는다. 같은 속보는 처음 빠진 원문에서 한 번만 걸린다
 
 ### ③-5 원문 저장 (2.3절)
 
@@ -122,14 +126,17 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 - `fetched_at`은 v1.5 확정 형식의 필드명이라 `_utc` 접미 규칙(5.2절)의 **예외**다. DB 색인 행은 `fetched_at_utc`로 쓴다
 - 연결 실패·타임아웃은 `body` 대신 `error: {type, message}`
 - 저장 직후 `body`를 사전 읽기해 결과 코드가 읽히는지 **확인만** 하고, 결과는 메타에 기록한다 (판정은 processor — 2.1절 사전 읽기 범위)
+- **DB 색인 행(`raw_index`)은 processor가 원문 메타로 쓴다**(2.3절, 결정 D1). collector는 DB에 쓰지 않는다 — 원문 저장과 `raw.fetched` 발행까지만. 단, 분할 합산 원문은 `completeness.collected`만 내고 색인 행이 없다(`reprocess` 대상 아님, 3.3절). `storage_key`가 고유라 같은 원문을 다시 처리해도 행이 늘지 않고, 받은 `raw_index.id`를 그 원문에서 나온 모든 적재 행의 `raw_id`로 쓴다. collector의 사전 읽기 결과(`precheck_code`)와 재시도 여부(`_retried`)는 원문 메타에 남긴다
 - **본문은 DB에 넣지 않는다.** 객체 저장소(S3/GCS, 로컬은 MinIO 또는 디스크)에 두고 DB에는 색인 행만 둔다 — 근거는 5.2절 (MySQL `TEXT` 64KB 한계). 저장 위치 최종 결정은 v1.5 12.1절 미결
 - 키: `raw/{api}/{yyyy}/{mm}/{dd}/{epoch_ms}_{tag}.json`. **`:` 등 OS 금지 문자 금지**
+- **다중 페이지 원문 보관**: 페이지별로 응답 본문을 각각 저장한다(`tag`로 구분, 예: `p1`·`p2`). processor가 여러 페이지 원문을 메모리에서 읽어 합산한다. 저장된 원문들을 하나로 합쳐 재직렬화한 뒤 저장하지 않는다(12절 원문 재직렬화 금지와 같은 원칙) *(제안)*
 
 ### ③-6 단계 간 알림 (2.2절)
 
 | 주제 | 발행 | 소비 | 본문 |
 | --- | --- | --- | --- |
-| `raw.fetched` | collector | processor | `raw_id`, `api`, `tag`, `fetched_at_utc` |
+| `raw.fetched` | collector | processor | `raw_id`(= 원문 객체 키, `raw_index.storage_key`), `api`, `tag`, `fetched_at_utc` — 정기 경로 원문만(분할 합산 원문은 내지 않는다, 3.3절) |
+| `completeness.collected` | collector(`completeness`) | processor `completeness-check` | `run_key`, `api`, `window_start`·`window_end`, `single_raw_id`, `parts` — 받은 것만 (개정 17) |
 | `obs.loaded` | processor | interpolation(조위 수온만), **grading(모든 축)** | `load_id`, `api`, `source`, `station_ids`, `observed_from_utc`, `observed_to_utc`, `row_count` |
 | `interp.done` | interpolation | grading | `run_id`, `load_id`, `farm_count`, `metric`, `error_p95`, `stations_used` |
 | `grade.done` | grading | evaluation | `grade_run_id`, `axis`, `farm_ids` |
@@ -145,6 +152,7 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 
 - 큐 구현(NATS / SQS)은 미결이다 — **`queue` 인터페이스 하나로 감싸고** 로컬 개발은 인메모리 구현을 쓴다
 - 메시지 스키마는 `contracts/queue/`에 두고 현재 버전은 `queue-v1`이다(7.7절 `contracts`)
+- **큐 `publish` 메시지 타입**: `Queue.publish(msg: Message)` — `Message(topic, payload)` 래퍼를 쓴다. `dict`를 직접 넘기지 않는다. 타입 계약을 내부 인터페이스에서도 강제해 타입 불일치를 조기에 잡는다 *(제안)*(2.2절)
 
 ### ③-7 좌표 (1.5·6.1·7.7절)
 
@@ -163,11 +171,12 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 | 계약 | `contracts/inputs/farm_sites.md` — 열 이름·타입·좌표계(WGS84 십진도)·삭제 표현 |
 | 새 양식장 | 등록 즉시 계산하지 않는다. **다음 조위관측소 적재 때**(최대 약 10분 뒤) 처음 추정값을 받는다 |
 | 좌표 검증 | 이 모듈의 `common/geo/` 폐구간 검증을 통과하지 못한 양식장은 계산할 수 없으므로 전 축 `provenance = NONE`, `none_reason = INVALID_COORDS`(4.8절) |
+| 해역 | **입력에 없다 — 모듈이 정해 알린다**(개정 15). 규칙: 양식장 좌표가 반경 안에 드는 해역(`areas` 시드) 중 **중심이 가장 가까운 하나**(같으면 `area_id` 순), 없으면 해역 없음. 판정은 `common/farm_sites/`(`assign_area`), 기록은 결과 테이블 `farm_areas`(5.3·5.5절). 적조 현재값의 해역 대응(4.8절)은 반경 안 해역을 **모두** 쓴다 — 별개 |
 
 ### ③-9 설정 로딩 · 기동 시 검사 (2.0.6·2.0.3·2.1절)
 
 - **판정 정의**는 이미지 안의 `config/definitions.yaml`에서 읽는다
-- **운영 조정**은 ConfigMap에서 읽는다. 로컬에서는 `OPERATIONAL_CONFIG_PATH`가 가리키는 파일이다 *(제안 — 환경변수 이름)*. 운영 조정 키: `tide.flatline_minutes`, `stale_threshold_hours.*`(**`chlorophyll` 제외**), `evaluation.interpolation_stale_minutes`·`grading_stale_minutes`. 초기값은 `config/operational.initial.yaml`이지만 **기동 시 대체값으로 쓰지 않는다**
+- **운영 조정**은 ConfigMap에서 읽는다. 로컬에서는 `OPERATIONAL_CONFIG_PATH`가 가리키는 파일이다 *(제안 — 환경변수 이름)*. 운영 조정 키: `tide.flatline_minutes`, `stale_threshold_hours.*`(**`chlorophyll` 제외**), `evaluation.interpolation_stale_minutes`·`grading_stale_minutes`, `typhoon_active`(R4 면제 — **스키마 필수 키**). 이 중 `processor`가 쓰는 것은 `tide.flatline_minutes`·`typhoon_active` 둘이다. 초기값은 `config/operational.initial.yaml`이지만 **기동 시 대체값으로 쓰지 않는다**
 - 스키마 검사 — `contracts/config/operational.schema.json`: 키 집합 고정(누락·모르는 키는 실패 — 오타 방어), 타입·단위, `<미결>` 같은 자리 표시 거부, 스키마 버전(`operational-v1`) 일치. 하한은 **실측 근거가 있는 키만** 둔다 — `dtRecent` 축은 최장 갱신 간격 15.4분(v1.5 4.3절) 미만 거부 *(제안)*
 
 - ConfigMap이 없거나 스키마와 다르면 **멈추고 보고**한다. `operational.initial.yaml`이나 코드 기본값으로 **조용히 대체하지 않는다**
@@ -185,20 +194,21 @@ v1.5 7.3절 규칙 중 이 모듈이 구현하는 것. R6(QC 플래그)은 폐�
 | --- | --- | --- | --- |
 | **R7** 파싱 실패 (최우선) | 전부 | 알려진 응답 스키마 어디에도 맞지 않음, 결과 코드를 못 찾음·빈 값 (3.2절) | `PARSE_FAILURE` — 원문 보관, 검토 대상. "데이터 없음"으로 축약하지 않는다 |
 | **R0** 결측 | tide·line·fishery | 수온·염분·pH가 `0.000` / 수온·염분·DO가 모두 빈 문자열인 레코드 | 결측(`MISSING`) — 관측 건수·커버리지에서 제외, 행은 저장 |
-| **R1** 생물부착 의심 | line·fishery | 염분 < 31.0 psu (정상 32~33). **하구 예외**: 섬진강하구 등 하구 정점은 적용하지 않는다 | `SENSOR_QUALITY` |
-| **R2** 클로로필 급변 | fishery | 클로로필 > 10.0 이고 직전 대비 증가 > 5.0. **직전 = 같은 정점(`FISHERY` + `LOCATION_POINT`)·같은 층의 바로 이전 조사** | `SENSOR_QUALITY` (해조류 간섭 의심) |
+| **R1** 생물부착 의심 | line·fishery | 염분 < 31.0 psu (정상 32~33). **하구 예외**: 섬진강하구 등 하구 정점은 적용하지 않는다. 예외 정점 목록(정선·어장환경 `station_id`)은 판정 정의 **`quality.r1_estuary_stations`** — 값 **`<미결>`**(11절). 미결인 동안은 예외 없이 모든 정점에 R1을 적용한다(게이트 경고, 7.7절). 2026-09-30 조사에서 픽스처 내 오탐 없음. `grading.estuary_stations`(조위관측소, 4.8절)와 다른 목록이다. `dtRecent`에는 R1을 적용하지 않는다 | `SENSOR_QUALITY` |
+| **R2** 클로로필 급변 | fishery | 클로로필 > 10.0 이고 직전 대비 증가 > 5.0. **직전 = 같은 정점(`FISHERY` + `LOCATION_POINT`)·같은 층의 바로 이전 조사**(조사 시각 `observed_at_utc` 기준 — 개정 14) | `SENSOR_QUALITY` (해조류 간섭 의심) |
 | **R3** 물리 범위 | 전부 | 수온 < 0 또는 > 35 ℃ | `SENSOR_QUALITY` |
-| **R4** 급변 | tide | 수온 1시간 변화 절댓값 > 5.0 ℃. **태풍 특보 중에는 면제** | `SENSOR_QUALITY` |
+| **R4** 급변 | tide | 수온 1시간 변화 절댓값 > 5.0 ℃. **1시간 전 값 = 같은 관측소 수온 중 관측 시각이 [t − 60분 − 허용, t − 60분]인 가장 늦은 유효값** — 허용은 판정 정의 `quality.r4_lookback_tolerance_min`(15.4 = 관측소 최장 갱신 간격, 1.2절). 창 안에 값이 없으면 R4를 판정하지 않는다. **태풍 특보 중에는 면제** — 특보 여부는 운영 조정 `typhoon_active`(운영자 수동 토글, 초기값 `false`)로 받는다(2026-09-30 결정). 특보 자동 입력 원천은 미결(11절) | `SENSOR_QUALITY` |
 | **R5** 침묵 | 전부 | 마지막 관측 이후 경과 > 축별 임계(4.9절 표). **적조는 예외 — 마지막 속보가 아니라 마지막 성공 호출 이후 경과**로 본다. 속보가 없는 것은 정상이고 호출 실패만 장애다(v1.5 7.3절 "이벤트성 — 호출 실패만 장애"). 클로로필은 임계 없이 게시 감시(4.5절) | `STALE` |
 
-- `SENSOR_QUALITY` 관측값은 IDW 입력에서 빠진다(4.7절 "사용 관측소") *(R1 하구 예외의 정점 목록과 태풍 특보 입력 원천은 구현 시 확인 — 11절)*
+- **R2·R4 직전 값을 찾는 범위**: 먼저 같은 수집(원문) 안에서 찾고, 없으면 **이미 적재된 DB 관측**에서 찾는다 — R4는 `observations`의 같은 관측소 수온(같은 창), R2는 `survey_observations`의 같은 정점·같은 층 바로 이전 조사. DB 조회는 적재 연결(I-12) 이후 구현한다(4.6·11절)
+- `SENSOR_QUALITY` 관측값은 IDW 입력에서 빠진다(4.7절 "사용 관측소") *(R1 하구 예외의 정점 목록과 태풍 특보 자동 입력 원천은 미결 — 11절)*
 
 - 규칙의 **기준값은 판정 정의 `quality.*`**(`config/definitions.yaml`)에서 읽는다 — `r1_salinity_min`·`r2_chlorophyll`·`r3_water_temp_range`·`r4_water_temp_delta_1h`. 위 표의 숫자는 현재 값이며 코드에 박지 않는다(7.7절)
 - 적용 원천(`scope`)이 규칙마다 다르다 — `dtRecent` 염분에는 R1을 적용하지 않는다
 
 ### ③-11 `adapter_health` 기록 (4.9절)
 
-- **`adapter_health` 갱신 규칙** (v1.5 4.5절 "헬스체크" 열) — `processor`가 원문 해석 결과로 기록한다
+- **`adapter_health` 갱신 규칙** (v1.5 4.5절 "헬스체크" 열) — `processor`가 원문 해석 결과로 기록한다. 키 `adapter`는 **수집 원천**(`tide`·`bulletin`·`line`·`fishery` — 결정 D2)이다. 한 원천에 api_id·`tag`가 여럿(어장환경 감시·백필·완전성)이라 원천 단위로 센다. 재시도 여부는 원문 메타의 `_retried`
   - **성공** — `OK`·`OK_EMPTY`·`NO_DATA`: `last_success_utc` 갱신, `consecutive_failures` 초기화
   - **실패** — `HTTP_ERROR`·`NET_ERROR`(진짜 장애): `last_failure_utc` 갱신, `consecutive_failures` 증가
   - **별도** — `TIMEOUT_05`: 재시도로 복구되면 `retry_recovered`만 올리고 실패로 세지 않는다. 재시도 후에도 `05`면 실패와 같게 센다 *(제안)*
@@ -206,8 +216,8 @@ v1.5 7.3절 규칙 중 이 모듈이 구현하는 것. R6(QC 플래그)은 폐�
 
 ### ③-12 진입점 (2.1·6.1절)
 
-- **`collector/main.py`** — 워크로드 명령(`collector-tide`·`collector-bulletin`·`collector-line`·`collector-fishery-watch`·`collector-fishery-backfill`·`collector-completeness`)마다 등록된 원천 어댑터를 부른다. **판정하지 않는다** — 원문과 요청 메타데이터만 남기고 `raw.fetched`를 발행한다. 수집 범위를 정하는 사전 읽기(결과 코드 존재, `totalCount`, 어장환경 올해 창 건수 — 직전 감시 원문의 메타 건수와 비교해 전량 수집 여부)만 허용하고, 그 결과를 상태 판정·적재에 쓰지 않는다
-- **`processor/main.py`** — `process`: `raw.fetched` 소비 → 원문 읽기 → `classifier` → 원천 어댑터의 해석·정규화 → `completeness` → `quality` → 적재(DB 접근 계층 인터페이스) → `adapter_health` 갱신 → `obs.loaded`. `reprocess`: 원문 ID 범위를 다시 처리한다(파서 수정 후). 재처리할 때마다 `ingest_runs`에 행을 추가한다 — 고유 (`raw_id`, `parser_version`)이므로 같은 파서로 같은 원문을 다시 처리하면(중복 알림) 행이 늘지 않는다(5.3절)
+- **`collector/main.py`** — 워크로드 명령(`collector-tide`·`collector-bulletin`·`collector-line`·`collector-fishery-watch`·`collector-fishery-backfill`·`collector-completeness`)마다 등록된 원천 어댑터를 부른다. 매니페스트는 접두 없는 이름(`tide`·`bulletin`·`line`·`fishery-backfill`·`completeness`, 감시는 `python -m collector.fishery_watch`)을 넘긴다 — 진입점의 `WORKLOADS` 표가 워크로드 → 어댑터 api_id를 정한다(`completeness`는 3개). 어댑터는 진입점이 import해 등록하고, 실행은 `collector.main` 모듈의 함수로 한다(`__main__` 레지스트리 분리 방지). **호출 실패도 원문(error 기록)으로 저장·발행한다**(2.3절) — 버리면 `adapter_health`가 장애를 볼 수 없다(개정 16). **판정하지 않는다** — 원문과 요청 메타데이터만 남기고 `raw.fetched`를 발행한다. 수집 범위를 정하는 사전 읽기(결과 코드 존재, `totalCount`, 어장환경 올해 창 건수 — 직전 감시 원문의 메타 건수와 비교해 전량 수집 여부)만 허용하고, 그 결과를 상태 판정·적재에 쓰지 않는다
+- **`processor/main.py`** — `process`: `raw.fetched` 소비 → 원문 읽기 → `classifier` → 원천 어댑터의 해석·정규화 → `completeness` → `quality` → 적재(`processor/_load.py` — `raw_index`·`ingest_runs`·관측·`stations`, I-12) → `adapter_health` 갱신(`processor/_health.py`) → `obs.loaded`. 적재와 헬스 갱신은 한 트랜잭션이고, 실패하면 알림을 내지 않는다. 받을 어댑터가 없는 api_id 중 설계 대기는 `PENDING_APIS`에 명시한다(개정 17 이후 비어 있다 — 분할 합산 원문은 `raw.fetched`로 오지 않는다). `reprocess`: 원문 ID(`raw_index.id`) 범위 `--raw-id-from`·`--raw-id-to`(양끝 포함)를 다시 처리한다(파서 수정 후 — 같은 파서 버전이면 아무것도 쓰지 않는다, 개정 15). 재처리할 때마다 `ingest_runs`에 행을 추가한다 — 고유 (`raw_id`, `parser_version`)이므로 같은 파서로 같은 원문을 다시 처리하면(중복 알림) 행이 늘지 않는다(5.3절)
 - 단계 전용 코드끼리 import하지 않는다 — 진입점이 원천 어댑터를 부르는 것은 같은 이미지 안의 등록이다
 
 ### ③-13 운영 지표 (9절)
@@ -222,7 +232,10 @@ v1.5 7.3절 규칙 중 이 모듈이 구현하는 것. R6(QC 플래그)은 폐�
 | `observation_latest_age_seconds` | `station_id`, `metric` |
 | `observation_missing_ratio` | `station_id`, `metric` |
 | `publication_check_total_count` | `axis`, `year` |
-| `completeness_mismatch_total` | `api` |
+| `completeness_mismatch_total` | `api`, `status` |
+| `completeness_last_checked_timestamp` | `api` |
+| `bulletin_window_missing_total` | — |
+| `bulletin_window_check_skipped_total` | `reason` |
 | `pipeline_event_lag_seconds` | `topic` |
 | `interpolation_run_duration_seconds` | — |
 | `interpolation_error_p95` | `metric`, `station_set_key` |
@@ -296,7 +309,10 @@ v1.5 7.3절 규칙 중 이 모듈이 구현하는 것. R6(QC 플래그)은 폐�
 | N6 | `resultCode: 12` | `NO_SERVICE`, 폐기 판정 없음 |
 | N7 | 필터 창 2024년 요청, 1997년 행 반환 | `FILTER_IGNORED` |
 | N12 | 분할 합산 — 단일 창(2025-09-24~)과 월 분할(2025-10~)처럼 **비교 범위가 다른** 두 결과 | 절단·`INCOMPLETE`로 판정하지 **않는다.** 운영 이벤트 `COMPARISON_RANGE_MISMATCH` + 검사 무효. A 재검증 F2 사고의 재현 방지 |
-| N13 | 분할 합산 — 범위를 일치시킨 뒤에도 월 분할 합 < 단일 창 | `INCOMPLETE` + 운영 이벤트 |
+| N13 | 분할 합산 — 범위를 일치시킨 뒤 건수가 다름: ① 분할 합 > 단일 창 ② 분할 합 < 단일 창 | 둘 다 `INCOMPLETE` + 운영 이벤트. `truncated_side` ① `SINGLE`(정기 수집 경로 절단 의심) ② `SPLIT` (개정 17) |
+| N14 | 분할 합산 — 월 분할 원문 하나가 결과 코드 `05`(재시도 후) 또는 연결 실패 | 비교하지 않는다 — `INVALID`(`PART_STATUS`) + 운영 이벤트 (개정 17) |
+| N15 | 적조 직전 원문 대조 — 잡아야 하는 것: ① 창 안 속보 하나 뺌 ② 이번 `OK_EMPTY`, 직전에 창 안 3건 ③ `day_report` = `sdate` 경계 ④ 같은 `day_report`의 번호 교체 | 각 `BULLETIN_WINDOW_MISSING` 1건(④ `same_day_replaced = true`), `ingest_runs.status` 그대로, 축 상태 변화 없음 (개정 18) |
+| N16 | 적조 직전 원문 대조 — 걸리면 안 되는 것: ① 창 밖으로 밀림 ② 순서 뒤바뀜(N을 N−1보다 먼저 처리) ③ 늦게 온 옛 원문 ④ 재처리·중복 알림 ⑤ 바로 앞 원문 실패 ⑥ 처음 실행 ⑦ 이번 원문 비정상 | ② X는 N−1에서 1건만 ⑤ 그 앞 정상 원문을 직전으로 ⑥ `NO_PREV` 건너뜀 지표 — 나머지 이벤트 없음 (개정 18) |
 
 **침묵 분류 계약 — 응답 해석 묶음** (7.3절)
 
@@ -309,8 +325,8 @@ v1.5 7.3절 규칙 중 이 모듈이 구현하는 것. R6(QC 플래그)은 폐�
 | # | 규칙 (절) | 입력 | 통과 기준 |
 | --- | --- | --- | --- |
 | Q1 | R3 물리 범위 (4.6) | 수온 −0.5 / 35.5 / 0.0 / 35.0 / 20.0 | 앞 둘만 `SENSOR_QUALITY`. 경계값 0.0·35.0은 정상 |
-| Q2 | R4 급변 (4.6) | 1시간 변화 +5.5 ℃ / 같은 입력 + 태풍 특보 중 / +4.9 ℃ | 첫째만 `SENSOR_QUALITY`. 태풍 특보 입력은 합성 플래그로 준다(원천 미결 — 11절) |
-| Q3 | R1 생물부착 (4.6) | 정선·어장환경 염분 30.9 / 하구 정점의 30.9 / `dtRecent` 염분 30.9 | 첫째만 `SENSOR_QUALITY`. 하구 예외 정점은 합성 목록으로 준다(목록 미결 — 11절). `dtRecent`에는 R1을 적용하지 않는다 |
+| Q2 | R4 급변 (4.6) | 1시간 변화 +5.5 ℃ / 같은 입력 + 태풍 특보 중 / +4.9 ℃ | 첫째만 `SENSOR_QUALITY`. 태풍 특보는 운영 조정 `typhoon_active = true`로 준다(4.6절). 추가: 같은 변화라도 직전 관측이 1시간 전 창(`quality.r4_lookback_tolerance_min`) 밖이면 정상 |
+| Q3 | R1 생물부착 (4.6) | 정선·어장환경 염분 30.9 / 하구 정점의 30.9 / `dtRecent` 염분 30.9 | 첫째만 `SENSOR_QUALITY`. 하구 예외 정점은 `quality.r1_estuary_stations`에 합성 목록으로 준다(값 미결 — 11절). `dtRecent`에는 R1을 적용하지 않는다 |
 | Q4 | R2 클로로필 급변 (4.6) | 10.5 & 직전 대비 +5.5 / 10.5 & +4.0 / 9.5 & +6.0 | 첫째만 `SENSOR_QUALITY` |
 | Q6 | `adapter_health` 갱신 (4.9) | 순서대로 `OK` → `NET_ERROR` → `NET_ERROR` → `PARSE_FAILURE` → `OK_EMPTY`, 별도로 `05` 후 재시도 성공 | `last_success_utc`는 1·5번째에만 갱신, `consecutive_failures`는 0→1→2→2→0 (파싱 실패는 세지 않음). 재시도 복구는 `retry_recovered`만 1 증가 |
 
@@ -336,3 +352,9 @@ v1.5 7.3절 규칙 중 이 모듈이 구현하는 것. R6(QC 플래그)은 폐�
 | 운영 조정 판정 재생(`evaluation gate`), 신선도 임계 판정 | `evaluation` |
 | `none_reason` 값 목록 | `grading` |
 | 거리 계산 방식의 출처 | `interpolation` |
+
+### 연결 검사 (7.9절, 개정 16)
+
+- 이 skill이 만드는 진입점·등록·알림·적재 호출은 **7.9 E1~E6**으로 확인한다 — 부품 검사(N·Q)만으로는 연결이 비어도 통과한다
+- 공공 API를 호출하지 않는다 — HTTP 호출층(`fetch`)만 픽스처 원문을 돌려주는 가짜로 바꾼다(`tests/db/test_collector_e2e.py`, `tests/unit/test_wiring.py`)
+

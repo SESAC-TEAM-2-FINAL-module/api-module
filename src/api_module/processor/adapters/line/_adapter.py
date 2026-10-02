@@ -130,6 +130,27 @@ class LineProcessorAdapter:
 
         return rows
 
+    def stations(self, pr: ParsedResponse) -> list[dict]:
+        """관측소 마스터 행 (5.3절, 결정 D5) — 원문 십진도 좌표(폐구간 통과분만). sea_area = gru_nam"""
+        defs = load_definitions()
+        lat_range = tuple(defs["geo"]["lat_range"])
+        lng_range = tuple(defs["geo"]["lng_range"])
+        out: dict[str, dict] = {}
+        for r in pr.items:
+            gru = str(r.get("gru_nam", "") or "").strip()
+            sln = str(r.get("sln_cde", "") or "").strip()
+            sta = str(r.get("sta_cde", "") or "").strip()
+            try:
+                lat, lng = float(r.get("lat") or ""), float(r.get("lon") or "")
+            except (ValueError, TypeError):
+                continue
+            if not validate_coords_closed(lat, lng, lat_range, lng_range):
+                continue
+            sid = f"line:{gru}-{sln}-{sta}"
+            out[sid] = {"id": sid, "source_api": "line", "name": None,
+                        "lat": lat, "lng": lng, "sea_area": gru or None, "active": True}
+        return list(out.values())
+
     def normalize(self, rows: list[dict]) -> list[dict]:
         """_raw_value → value/missing_reason. CAST_RULE_ASSUMPTION_BROKEN 감사."""
         broken_keys: set = set()

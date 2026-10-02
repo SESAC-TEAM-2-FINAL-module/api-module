@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 import os
+import urllib.parse
 from dataclasses import dataclass
 
 
@@ -22,7 +23,9 @@ class EnvConfig:
         value = os.environ.get(var_name)
         if not value:
             raise RuntimeError(f"필수 환경변수 미설정: {var_name}")
-        return value
+        # 포털에서 복사한 URL-encoded 형태(%XX)를 자동 디코딩
+        # 원문이 들어와도 no-op
+        return urllib.parse.unquote(value)
 
 
 def load_env_config() -> EnvConfig:
@@ -36,3 +39,15 @@ def load_env_config() -> EnvConfig:
     if missing:
         raise RuntimeError(f"필수 URL 환경변수 미설정: {', '.join(missing)}")
     return EnvConfig(dtrecent_url=url, nifs_url=nifs_url)
+
+
+def database_url() -> str:
+    """
+    DB 연결 문자열 (DATABASE_URL — .env·Secret). 값은 출력하지 않는다(CLAUDE.md 2절).
+    없으면 멈춘다 — DB 없이 기동하지 않는다. 수집용 URL(DTRECENT_URL 등)은 요구하지 않는다
+    """
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise SystemExit("DATABASE_URL 미설정 — DB 없이 기동하지 않는다")
+    return url
+

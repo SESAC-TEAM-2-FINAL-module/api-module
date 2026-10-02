@@ -1,14 +1,324 @@
-# .gitlab-ci.yml — 빌드 → 레지스트리 푸시 → manifest 레포 이미지 알림
-# 계획서 2.0.5절 · I-10에서 내용 채움
-# 현재: 골격만
+# api-module CI — 계획서 2.0.5절 · 7.6절 · 7.7절
+#
+# 파이프라인: test → gate → build → notify
+#
+# - 레지스트리 주소: CI 변수 REGISTRY 하나로 (코드에 주소 없음, 계획서 2.0.2절)
+# - CI는 이미지 알림만 보낸다 — manifest 파일 커밋·PR 금지 (계획서 금지 규칙)
+# - 선택 빌드: 바뀐 경로에 해당하는 이미지만 빌드 (계획서 6.1절 경로→이미지 대응표)
 
 stages:
+  - test
   - gate
   - build
   - notify
 
-# I-10에서 구현:
-# - 경로 조건(rules: changes)으로 이미지 선택 빌드
-# - 7.7절 게이트 ①·①'·② 통과 시에만 푸시
-# - contracts/release/ 형식으로 이미지 알림
-# - REGISTRY 변수 하나로 레지스트리 추상화
+variables:
+  PYTHON_IMAGE: "python:3.11-slim"
+  DOCKER_IMAGE: "docker:24"
+  # REGISTRY, MANIFEST_TRIGGER_URL, MANIFEST_TRIGGER_TOKEN 은 GitLab CI 변수에서 주입
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 공통 경로 목록 — YAML 스칼라 앵커로 재사용 (시퀀스 머지 대신 명시적 나열)
+# ─────────────────────────────────────────────────────────────────────────────
+# 공통 변경 시 전 이미지 재빌드 대상 경로
+# collector / processor / interpolation / grading / evaluation 에서 각자 명시
+
+# ─────────────────────────────────────────────────────────────────────────────
+# test — 단위·DB·건수 보존 (② 계획서 7.7절)
+# ─────────────────────────────────────────────────────────────────────────────
+test:unit:
+  stage: test
+  image: $PYTHON_IMAGE
+  before_script:
+    - pip install --no-cache-dir -e ".[test,db-postgres]"
+  script:
+    - pytest tests/unit/ -v --tb=short
+  rules:
+    - when: always
+
+test:db:
+  stage: test
+  image: $DOCKER_IMAGE
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - apk add --no-cache python3 py3-pip
+    - pip install --no-cache-dir -e ".[test,db-postgres]"
+  script:
+    - pytest tests/db/ -v --tb=short
+  rules:
+    - when: always
+
+test:gate-counts:
+  # ② 건수 보존 — 픽스처 파이프라인 통과 건수 대조 (계획서 7.7절)
+  stage: test
+  image: $PYTHON_IMAGE
+  before_script:
+    - pip install --no-cache-dir -e ".[test,db-postgres]" PyYAML
+  script:
+    - pytest tests/gate/ -v --tb=short
+  rules:
+    - when: always
+
+# ─────────────────────────────────────────────────────────────────────────────
+# gate — ① 판정 정의 대조 + ①′ 운영 조정 검사 (계획서 7.7절)
+# ─────────────────────────────────────────────────────────────────────────────
+gate:definitions-and-operational:
+  stage: gate
+  image: $PYTHON_IMAGE
+  needs: [test:unit, test:db, test:gate-counts]
+  before_script:
+    - pip install --no-cache-dir PyYAML jsonschema
+    - pip install --no-cache-dir -e ".[db-postgres]"
+  script:
+    # --warn-pending: 판정 정의 <미결> 항목을 경고로 처리 (운영 조정 <미결>은 항상 실패)
+    # 판정 정의 <미결>이 모두 결정되면 플래그를 제거한다
+    - python ci/gate/run_gate.py --warn-pending
+  rules:
+    - when: on_success
+
+# ─────────────────────────────────────────────────────────────────────────────
+# build 공통 템플릿
+# ─────────────────────────────────────────────────────────────────────────────
+.build_template:
+  stage: build
+  image: $DOCKER_IMAGE
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  needs: [gate:definitions-and-operational]
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$REGISTRY"
+  script:
+    - |
+      IMAGE="${REGISTRY}/api-module/${IMAGE_NAME}"
+      TAG="${CI_COMMIT_SHA:0:8}"
+      docker build -f "docker/${IMAGE_NAME}/Dockerfile" -t "${IMAGE}:${TAG}" .
+      docker push "${IMAGE}:${TAG}"
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        docker tag "${IMAGE}:${TAG}" "${IMAGE}:${CI_COMMIT_TAG}"
+        docker push "${IMAGE}:${CI_COMMIT_TAG}"
+      fi
+      DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE}:${TAG}" | sed 's/.*@//')
+      printf 'IMAGE_NAME=%s\nIMAGE_TAG=%s\nIMAGE_DIGEST=%s\nIMAGE_FULL=%s\n' \
+        "${IMAGE_NAME}" "${TAG}" "${DIGEST}" "${IMAGE}" > build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+
+# ─────────────────────────────────────────────────────────────────────────────
+# build — 이미지별 선택 빌드 (계획서 6.1절 경로→이미지 대응표)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# collector: common/** 변경 시에도 재빌드
+build:collector:
+  extends: .build_template
+  variables:
+    IMAGE_NAME: collector
+  rules:
+    - changes:
+        - src/api_module/common/**/*
+        - contracts/**/*
+        - config/definitions.yaml
+        - pyproject.toml
+        - src/api_module/collector/**/*
+        - docker/collector/**/*
+      when: on_success
+
+build:processor:
+  extends: .build_template
+  variables:
+    IMAGE_NAME: processor
+  rules:
+    - changes:
+        - src/api_module/common/**/*
+        - contracts/**/*
+        - config/definitions.yaml
+        - pyproject.toml
+        - src/api_module/processor/**/*
+        - docker/processor/**/*
+        - seeds/**/*
+      when: on_success
+
+build:interpolation:
+  extends: .build_template
+  variables:
+    IMAGE_NAME: interpolation
+  rules:
+    - changes:
+        - src/api_module/common/**/*
+        - contracts/**/*
+        - config/definitions.yaml
+        - pyproject.toml
+        - src/api_module/interpolation/**/*
+        - docker/interpolation/**/*
+      when: on_success
+
+build:grading:
+  extends: .build_template
+  variables:
+    IMAGE_NAME: grading
+  rules:
+    - changes:
+        - src/api_module/common/**/*
+        - contracts/**/*
+        - config/definitions.yaml
+        - pyproject.toml
+        - src/api_module/grading/**/*
+        - docker/grading/**/*
+      when: on_success
+
+build:evaluation:
+  extends: .build_template
+  variables:
+    IMAGE_NAME: evaluation
+  rules:
+    - changes:
+        - src/api_module/common/**/*
+        - contracts/**/*
+        - config/definitions.yaml
+        - pyproject.toml
+        - src/api_module/evaluation/**/*
+        - docker/evaluation/**/*
+        - fixtures/synthetic/**/*
+      when: on_success
+
+# ─────────────────────────────────────────────────────────────────────────────
+# notify — 이미지 알림 (contracts/release/image_notice.json 형식, 계획서 2.0.5절)
+# manifest 레포 파일을 커밋하거나 PR을 열지 않는다 (계획서 금지 규칙)
+# ─────────────────────────────────────────────────────────────────────────────
+.notify_template:
+  stage: notify
+  image: $PYTHON_IMAGE
+  before_script:
+    - pip install --no-cache-dir PyYAML
+  script:
+    - |
+      python - <<'PYEOF'
+      import json, os, sys, urllib.request, urllib.error
+      from datetime import datetime, timezone
+
+      import yaml
+
+      image_name = os.environ["IMAGE_NAME"]
+      image_tag  = os.environ["IMAGE_TAG"]
+      digest     = os.environ["IMAGE_DIGEST"]
+      git_sha    = os.environ.get("CI_COMMIT_SHA", "")[:8]
+      built_at   = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+      defs = yaml.safe_load(open("config/definitions.yaml", encoding="utf-8"))
+      c = defs.get("contracts", {})
+      contracts_version = f"tables-{c.get('tables','?')} / queue-{c.get('queue','?')} / operational-{c.get('operational','?')}"
+
+      notice = {
+          "image": f"api-module/{image_name}",
+          "tag": image_tag,
+          "digest": digest,
+          "git_sha": git_sha,
+          "built_at_utc": built_at,
+          "contracts_version": contracts_version,
+      }
+      payload = json.dumps(notice).encode()
+      print(f"[notify] 페이로드: {json.dumps(notice, indent=2, ensure_ascii=False)}")
+
+      trigger_url = os.environ.get("MANIFEST_TRIGGER_URL", "")
+      token       = os.environ.get("MANIFEST_TRIGGER_TOKEN", "")
+      if not trigger_url:
+          print("[notify] MANIFEST_TRIGGER_URL 미설정 — 알림 건너뜀 (인프라 구성 후 활성화)")
+          sys.exit(0)
+
+      req = urllib.request.Request(
+          trigger_url,
+          data=payload,
+          headers={"Content-Type": "application/json", "X-Token": token},
+          method="POST",
+      )
+      try:
+          with urllib.request.urlopen(req, timeout=10) as resp:
+              print(f"[notify] {image_name}: HTTP {resp.status}")
+      except urllib.error.HTTPError as e:
+          print(f"[notify] {image_name}: 알림 실패 HTTP {e.code}")
+          sys.exit(1)
+      PYEOF
+
+notify:collector:
+  extends: .notify_template
+  needs:
+    - job: build:collector
+      artifacts: true
+  rules:
+    - changes:
+        - src/api_module/common/**/*
+        - contracts/**/*
+        - config/definitions.yaml
+        - pyproject.toml
+        - src/api_module/collector/**/*
+        - docker/collector/**/*
+      when: on_success
+
+notify:processor:
+  extends: .notify_template
+  needs:
+    - job: build:processor
+      artifacts: true
+  rules:
+    - changes:
+        - src/api_module/common/**/*
+        - contracts/**/*
+        - config/definitions.yaml
+        - pyproject.toml
+        - src/api_module/processor/**/*
+        - docker/processor/**/*
+        - seeds/**/*
+      when: on_success
+
+notify:interpolation:
+  extends: .notify_template
+  needs:
+    - job: build:interpolation
+      artifacts: true
+  rules:
+    - changes:
+        - src/api_module/common/**/*
+        - contracts/**/*
+        - config/definitions.yaml
+        - pyproject.toml
+        - src/api_module/interpolation/**/*
+        - docker/interpolation/**/*
+      when: on_success
+
+notify:grading:
+  extends: .notify_template
+  needs:
+    - job: build:grading
+      artifacts: true
+  rules:
+    - changes:
+        - src/api_module/common/**/*
+        - contracts/**/*
+        - config/definitions.yaml
+        - pyproject.toml
+        - src/api_module/grading/**/*
+        - docker/grading/**/*
+      when: on_success
+
+notify:evaluation:
+  extends: .notify_template
+  needs:
+    - job: build:evaluation
+      artifacts: true
+  rules:
+    - changes:
+        - src/api_module/common/**/*
+        - contracts/**/*
+        - config/definitions.yaml
+        - pyproject.toml
+        - src/api_module/evaluation/**/*
+        - docker/evaluation/**/*
+        - fixtures/synthetic/**/*
+      when: on_success

@@ -25,39 +25,47 @@ bulletin:
     - Cochlodinium polykrikoides
     - Margalefidinium polykrikoides
   grade_thresholds: [10, 100, 1000]   # PRE_ADVISORY / ADVISORY / WARNING 경계
-  current_window_days: <미결>          # 적조 현재값 유효 기간 (계획서 4.8절)
+  current_window_days: 3               # 적조 현재값 유효 기간 — R1·R3 최대 간격 3일 (2026-09-30 채택)
 
 line:
   cast_gap_minutes: 60       # 기본값 — 캐스트 키 X 검증 완료 (계획서 11절)
-  surface_rule: <미결>        # 결정 전 DO = NONE (SURFACE_RULE_UNDECIDED, 계획서 4.8절)
+  surface_rule: INCLUDE        # 0m 레코드 채택 — 픽스처 1154 캐스트 전체 0m 1개씩 (2026-09-30 채택)
 
 interpolation:
   method: M2                  # 기본값 — B2 승격 결정 대기 (계획서 11절)
   power_p: 2
   n_neighbors: 5              # 기본값
   align_window_min: 30        # 기본값 — 결정 대기 (계획서 11절)
-  exclude_flatline: <미결>
-  error_window_days: <미결>   # 교차검증 결과 보기 전 고정 필요 (계획서 A1 순서 3)
+  exclude_flatline: true        # STALE_SUSPECT 관측소 IDW 제외 (2026-09-30 채택)
+  error_window_days: 30        # soo 픽스처 최근 30일 내 관측일 19일 — LOOCV 충분 (2026-09-30 채택)
 
 grading:
   p95_thresholds:
     water_temp: [1.0, 2.0, 3.0]
-  salinity_mode: <미결>              # NEAREST_TIDE / NONE (계획서 4.8절)
+  salinity_mode: NEAREST_TIDE        # NEAREST_TIDE / NONE (계획서 4.8절)
   chlorophyll_estimate_enabled: false
-  line_max_distance_km: <미결>       # DO 정점 거리 한계 (계획서 4.8절)
-  fishery_max_distance_km: <미결>    # 클로로필 정점 거리 한계 (계획서 4.8절)
-  excluded_zones: <미결>             # 중심·반경 목록 (계획서 4.7·4.8절)
+  line_max_distance_km: 30            # DO 정점 거리 한계 — 합성 양식장 최근접 29.4km (2026-09-30 채택)
+  fishery_max_distance_km: 10        # 클로로필 정점 거리 한계 — 합성 양식장 최근접 1.2km (2026-09-30 채택)
+  excluded_zones:                    # 중심·반경 목록 (계획서 4.7·4.8절)
+    - name: seomjin_estuary
+      center_lat: 35.00
+      center_lng: 127.73
+      radius_km: 15
+  estuary_stations:                  # 하구 영향 관측소 — salinity_mode=NEAREST_TIDE 시 NONE 처리
+    - DT_0016
 
 quality:
   r1_salinity_min: 31.0
   r2_chlorophyll: {value: 10.0, delta: 5.0}
   r3_water_temp_range: [0, 35]
   r4_water_temp_delta_1h: 5.0
+  r4_lookback_tolerance_min: 15.4   # R4 "1시간 전" 창 허용 — 관측소 최장 갱신 간격 (계획서 1.2·4.6절, 개정 13)
+  r1_estuary_stations: <미결>         # R1 하구 예외 정점(정선·어장환경 station_id) — 미결 동안 예외 없음 (계획서 4.6·11절)
 
 stale_threshold_hours:
   chlorophyll: null   # 게시 시계 규칙 — 판정 정의 (계획서 2.0.6절)
 
 contracts:
   queue: queue-v1
-  tables: tables-v1
+  tables: tables-v2          # 개정 14 — source_ref(DO·클로로필 = station_id@observed_at_utc)·survey_observations 키
   operational: operational-v1

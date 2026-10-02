@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 import sys
+from datetime import datetime, timedelta
 
 from common.classifier import ParsedResponse
 from common.config import load_definitions
@@ -52,8 +53,9 @@ class FisheryProcessorAdapter:
 
             try:
                 surveyed_on = _assemble_date(r)
+                observed_at_utc = _assemble_observed_at_utc(r, surveyed_on)
             except ValueError as e:
-                print(f"[fishery-processor] 날짜 오류 skip: {e}", file=sys.stderr)
+                print(f"[fishery-processor] 날짜·시각 오류 skip: {e}", file=sys.stderr)
                 continue
 
             lat = dms_to_decimal(r.get("LATITUDE", ""))
@@ -66,6 +68,7 @@ class FisheryProcessorAdapter:
             for api_field, metric, layer in _METRIC_FIELDS:
                 rows.append({
                     "station_id": station_id,
+                    "observed_at_utc": observed_at_utc,
                     "surveyed_on": surveyed_on,
                     "layer": layer,
                     "metric": metric,
@@ -74,6 +77,26 @@ class FisheryProcessorAdapter:
                     "raw_id": raw_id,
                 })
         return rows
+
+    def stations(self, pr: ParsedResponse) -> list[dict]:
+        """관측소 마스터 행 (5.3절, 결정 D5) — 원문 도분초 좌표를 십진도로(폐구간 통과분만). name = FISHERY"""
+        defs = load_definitions()
+        lat_range = tuple(defs["geo"]["lat_range"])
+        lng_range = tuple(defs["geo"]["lng_range"])
+        out: dict[str, dict] = {}
+        for r in pr.items:
+            fishery = str(r.get("FISHERY", "") or "").strip()
+            location_point = str(r.get("LOCATION_POINT", "") or "").strip()
+            if not fishery or not location_point:
+                continue
+            lat = dms_to_decimal(r.get("LATITUDE", ""))
+            lng = dms_to_decimal(r.get("LONGITUDE", ""))
+            if lat is None or lng is None or not validate_coords_closed(lat, lng, lat_range, lng_range):
+                continue
+            sid = f"fishery:{fishery}-{location_point}"
+            out[sid] = {"id": sid, "source_api": "fishery", "name": fishery,
+                        "lat": lat, "lng": lng, "sea_area": None, "active": True}
+        return list(out.values())
 
     def normalize(self, rows: list[dict]) -> list[dict]:
         for row in rows:
@@ -132,6 +155,22 @@ def _assemble_date(r: dict) -> str:
         return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
     except (ValueError, TypeError) as e:
         raise ValueError(f"날짜 변환 실패: Y={y} M={m} D={d}") from e
+
+
+def _assemble_observed_at_utc(r: dict, surveyed_on: str) -> str:
+    """
+    조사 시각 = DATE_Y/M/D + TIME_H·TIME_I — KST(계획서 1.5절, 사용자 확인) → UTC ISO.
+    시각이 없거나 범위 밖이면 추정하지 않고 오류 (그 레코드는 건너뛴다)
+    """
+    h, m = r.get("TIME_H"), r.get("TIME_I")
+    try:
+        hh, mm = int(h), int(m)
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"조사 시각 없음·변환 실패: TIME_H={h} TIME_I={m}") from e
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        raise ValueError(f"조사 시각 범위 밖: TIME_H={h} TIME_I={m}")
+    kst = datetime.fromisoformat(f"{surveyed_on}T{hh:02d}:{mm:02d}:00")
+    return (kst - timedelta(hours=9)).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _parse_value(raw_val, metric: str) -> tuple[float | None, str | None]:

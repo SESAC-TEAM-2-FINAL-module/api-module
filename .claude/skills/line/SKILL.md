@@ -56,25 +56,25 @@ description: "정선해양관측(sooList) 수집·가공 어댑터 — src/api_m
 
 - 워크로드 `collector-line` — CronJob 1일(워크로드 설정). **1년 창 1회 호출**. 호출 예산 하루 1회
 - **페이징이 없다** — `pageNo`를 무시하고 전체를 준다. 페이지를 넘기며 여러 번 부르면 **같은 데이터가 페이지 수만큼 중복**된다. 1회만 부른다
-- 완전성은 **분할 합산**으로 본다 — `collector-completeness`(주 1회)가 같은 창을 월 분할로 받아 `tag = completeness` 원문을 남기고, 비교는 `common-core`가 한다. **비교 범위를 먼저 맞춘다**(N12)
+- 완전성은 **분할 합산**으로 본다 — `collector-completeness`(주 1회)가 같은 실행에서 단일 창 1회 + 같은 창의 월 분할을 받아 `cmp_{실행 키}_…` 원문을 남기고(아래 "분할 합산 수집"), 비교는 `common-core`가 한다. **비교 범위를 먼저 맞춘다**(N12)
 
 ### ③-3 정규화 (4.4·5.3절)
 
 - 출력: `line_observations(station_id, observed_at_utc, depth_m, metric, value, cast_id, group_type)`
 - **metric은 3종** — `water_temp`(원문 `wtr_tmp`) · `salinity`(`sal`) · `dissolved_oxygen`(`dox`). 쓰임이 정해진 것만 저장한다: DO는 양식장 DO 칸(4.8절), 수온·염분은 품질 규칙 R3·R1. 빈 값 레코드의 정의(세 값이 모두 빈 행)도 이 3종 기준이다. 영양염·pH·투명도 등 나머지 수치 필드는 저장하지 않는다 — 원문이 보관되므로 필요해지면 API 재호출 없이 `reprocess`로 추가한다. 원문 필드명은 B v2 수집 결과(`line_depth_report_v2`)의 필드 목록 기준이며 I-4에서 원문으로 확인한다
-- **표층**: `wtr_dep == 0` 레코드 — 채택은 `MVP동작조건_충족계획서` 2절 결정 대기. **저장할 때 표층을 표시하지 않는다.** `depth_m`을 항상 보존하고, 결정이 나면 판정 정의 `line.surface_rule`만 정한다. 규칙은 **`grading`이 읽을 때** 적용한다(4.8절) — 재처리가 필요 없고, 규칙의 원천이 설정값 하나뿐이다
-- **캐스트 키**: 같은 정점 연속 레코드 간격 ≤ X분 (X 후보 60, 10~720분 어디서나 결과 동일). `cast_id`는 X를 열 이름이 아니라 **`cast_rule_version`**으로 기록
+- **표층**: `wtr_dep == 0` 레코드 — **채택 `line.surface_rule: INCLUDE`(2026-09-30)** — 픽스처 1,154 캐스트 전부 0m 레코드 정확히 1개. **저장할 때 표층을 표시하지 않는다.** `depth_m`을 항상 보존하고, 결정이 나면 판정 정의 `line.surface_rule`만 정한다. 규칙은 **`grading`이 읽을 때** 적용한다(4.8절) — 재처리가 필요 없고, 규칙의 원천이 설정값 하나뿐이다
+- **캐스트 키**: 같은 정점 연속 레코드 간격 ≤ X분 (X 후보 60, 10~720분 어디서나 결과 동일). `cast_id`는 X를 열 이름이 아니라 **`cast_rule_version`**으로 기록. 형식은 `f"x{cast_gap_minutes}"` — 예: `x60` (`line.cast_gap_minutes: 60` 기준)
 - **전제 감시**: 연속 간격이 10~720분에 들어오면 운영 이벤트 `CAST_RULE_ASSUMPTION_BROKEN`
 - 빈 값 레코드 제외, 좌표 **폐구간** 검증
 
 - `line_observations`의 컬럼: `station_id`, `observed_at_utc`, `metric`, `value`(nullable), `missing_reason`, `flags`, `raw_id` + `depth_m`, `cast_id`, `cast_rule_version`, `group_type`. **PK에 `depth_m`이 들어간다**(5.3절). 표층 표시 열은 **없다**
 - 정점 키는 `gru_nam`·`sln_cde`·`sta_cde` 셋이다. **`station_id`는 `line:` + 세 값을 `-`로 이은 값**이다 — `stations.id` 형식 `원천:원천키`(5.3절)
 - 캐스트 간격 X는 판정 정의 **`line.cast_gap_minutes`**(현재 60 — **기본값, 결정 대기**)에서 읽는다. X를 바꾸면 `cast_rule_version`이 바뀌어야 한다
-- 표층 규칙은 판정 정의 **`line.surface_rule`(`<미결>`)**이다. 값을 채우지 않는다. 이 skill의 코드는 이 설정을 **읽지 않는다** — 저장할 때 표층을 표시하지 않기 때문이다
+- 표층 규칙은 판정 정의 **`line.surface_rule`(채택 `INCLUDE`)**이다. 이 skill의 코드는 이 설정을 **읽지 않는다** — 저장할 때 표층을 표시하지 않기 때문이다
 - 원문 필드 → metric: `wtr_tmp` → `water_temp`, `sal` → `salinity`, `dox` → `dissolved_oxygen`. 원문 필드명은 I-4에서 원문으로 확인해 `docs/SOURCES.md`에 기록한다. 다르면 추정하지 말고 멈춰 보고한다
 - `group_type`의 값은 이식 출처 `normalize_line_with_depth()`(B v2)의 정의를 따르고 `docs/SOURCES.md`에 기록한다. **원문 레코드 단위**(metric을 펼치기 전)로 계산한다
 - QC 필드(`qc_wtr`·`qc_sal`·`qc_dox`)는 전건 `2`라 판정에 쓰지 않는다 — 저장만
-- **원천 시각(`obs_dtm`)의 시간대**는 계획서에 적혀 있지 않다. I-4에서 원문으로 확인해 `docs/SOURCES.md`에 기록하고 UTC로 변환한다 — **추정하지 않는다**. 모르면 멈추고 보고한다. 캐스트 키는 시각 간격으로 계산하므로 시간대와 무관하지만, `observed_at_utc`는 영향을 받는다
+- **원천 시각(`obs_dtm`)의 시간대**는 계획서 1.4절에 **KST** *(제안)*로 기록돼 있다 — API 공식 문서에 명시는 없고, 간접 증거 둘 — IDW 검증 코드(`$SRC_IDW/src/normalizer.py`)가 KST로 취급, 픽스처 관측 시각이 관측선 운항 시간대와 일치(`docs/SOURCES.md`). "동일 기관 dtRecent"는 근거가 아니다(`dtRecent`는 국립해양조사원). 저장할 때 UTC로 변환한다(5.2절). 원문에서 이와 어긋나는 증거를 만나면 멈추고 보고한다. 캐스트 키는 시각 간격으로 계산하므로 시간대와 무관하지만, `observed_at_utc`는 영향을 받는다
 
 ### ③-4 이 원천에 적용되는 품질 규칙 (4.6절)
 
@@ -88,14 +88,14 @@ description: "정선해양관측(sooList) 수집·가공 어댑터 — src/api_m
 | **R3** 물리 범위 | 전부 | 수온 < 0 또는 > 35 ℃ | `SENSOR_QUALITY` |
 | **R5** 침묵 | 전부 | 마지막 관측 이후 경과 > 축별 임계(4.9절 표). **적조는 예외 — 마지막 속보가 아니라 마지막 성공 호출 이후 경과**로 본다. 속보가 없는 것은 정상이고 호출 실패만 장애다(v1.5 7.3절 "이벤트성 — 호출 실패만 장애"). 클로로필은 임계 없이 게시 감시(4.5절) | `STALE` |
 
-- **R1(생물부착)은 정선에 적용된다** — 염분 < 31.0 psu. 하구 정점은 예외이며, 그 **정점 목록은 미결**이다(11절)
+- **R1(생물부착)은 정선에 적용된다** — 염분 < 31.0 psu. 하구 정점은 예외이며, 그 **정점 목록은 판정 정의 `quality.r1_estuary_stations`(값 `<미결>`)**이다(11절). 판정 정의 `grading.estuary_stations`는 조위관측소 염분 영역 판정용(4.8절)이라 이 목록이 아니다
 - R0의 "수온·염분·DO가 모두 빈 문자열인 레코드"가 이 원천의 빈 값 레코드다(남해 739행)
 
 ### ③-5 이 skill이 주인인 사실 (A.3)
 
 **표층 규칙의 정의와 0m DO.** 규칙의 **적용**은 `grading`이 읽을 때 한다(4.4·4.8절). `grading`은 아래 정의를 참조만 하고 다시 정하지 않는다.
 
-- 표층 = 캐스트 안의 **`wtr_dep == 0` 레코드** — **채택 결정 대기**(충족계획서 2절). 결정은 판정 정의 `line.surface_rule` 하나로만 반영되고 재처리는 없다. 그래서 이 skill은 **`depth_m`과 `cast_id`를 반드시 보존**해야 한다 — 적용이 읽을 때 일어나므로, 저장이 틀리면 결정 후에도 표층을 찾을 수 없다
+- 표층 = 캐스트 안의 **`wtr_dep == 0` 레코드** — **채택 `INCLUDE`**(2026-09-30, 충족계획서 2절). 결정은 판정 정의 `line.surface_rule` 하나로만 반영되고 재처리는 없다. 그래서 이 skill은 **`depth_m`과 `cast_id`를 반드시 보존**해야 한다 — 적용이 읽을 때 일어나므로, 저장이 틀리면 결정 후에도 표층을 찾을 수 없다
 - **0m 레코드가 없는 캐스트에는 표층값이 없다.** 가장 얕은 수심으로 대체하지 않는다(결과를 보고 만든 대체 규칙)
 - **0m 레코드가 둘 이상인 캐스트**의 처리는 계획서에 규칙이 없다. 실측은 0건이다(F5 — 324캐스트 모두 정확히 1개). 만나면 추정하지 말고 멈춰 보고한다
 - 0m DO의 날짜별 유효 여부는 **아직 확인되지 않았다.** v1.5는 "인근 정점이 2025-11 이후 DO 값이 비어 있다"고 적었지만, 빈 값 레코드 739행은 세 값이 **모두** 빈 레코드라 "0m에서 DO만 빈 경우"는 세지 않았다(4.8절). 이 skill의 I-4 집계가 그 확인이다
@@ -147,7 +147,7 @@ description: "정선해양관측(sooList) 수집·가공 어댑터 — src/api_m
 | N9 | `sooList` 같은 정점 90분 간격 삽입 | `CAST_RULE_ASSUMPTION_BROKEN` 1건 |
 
 - 원문: `$SRC_IDW/output_line_v2/raw/sooList_depth_20260923_*.json`(B v2 수정 형식, `body` = 원문) → `fixtures/raw/`(A.7절)
-- 게이트 기대값(7.7절 `counts`): `soo_v2: {raw: 10445, south: 2584, south_lat33_kept: 523, casts: 324, casts_one_zero: 324, empty_value_dropped: 739}`. **523·739는 B v2 보고서에 직접 없는 값이라 I-0에서 원문으로 재확인한 뒤 확정**된다
+- 게이트 기대값(7.7절 `counts`): `soo_v2: {raw: 10445, south: 2584, south_lat33_kept: 523, casts: 324, casts_one_zero: 324, empty_value_dropped: 739, coord_excluded: 1029}`. **523·739·1029는 I-0에서 원문으로 재확인해 확정**됐다. `south`(2584)·`empty_value_dropped`(739)는 어댑터가 `_region` 메타를 노출하지 않아 자동 검증이 없다(`pytest.skip`) — 어댑터 계약에 `_region` 추가 또는 기준 문서에서 제거 검토 *(제안)*(7.7절)
 - **인근 정점 0m DO 날짜별 집계(S5 통과 기준)**: B v2 원문으로, 남해 정점마다 항차 날짜별 0m 레코드의 DO 유효 여부(값 있음 / 빈 값)를 센다. 합성 양식장(가막만, `fixtures/synthetic/farms.csv`)과의 거리를 함께 적는다. DO 거리 한계는 미결이므로 **거리로 거르지 않는다**. 결과는 판정 없이 보고한다 — DO 신선도 임계(4.9절)를 정할 근거다
 - 관련 검사(다른 skill 소유): N12·N13(분할 합산), Q1(R3)·Q3(R1) — `common-core` / P11(표층 미결 시 DO `NONE`)·P14(DO 정점 선택) — `grading`
 
@@ -161,3 +161,8 @@ description: "정선해양관측(sooList) 수집·가공 어댑터 — src/api_m
 | 호출층, 응답 해석, 원문 저장, 분할 합산 비교, 좌표 폐구간 검증, 품질 규칙 구현 | `common-core` |
 | 표층 규칙의 적용, 양식장별 DO 정점 선택, 결정 전 DO `NONE`(`SURFACE_RULE_UNDECIDED`) | `grading` |
 | DO 신선도 임계 | `evaluation` |
+
+### 분할 합산 수집 · 1년 창 (3.3절, 개정 17)
+
+- **1년 창 = 작년 같은 날(없으면 2월 28일) ~ 끝 날짜, 양끝 포함**(보통 366일) — IDW 검증 코드와 기준 데이터(10,445행, 2025-09-23~2026-09-23)가 이 창이다. `year_window(end)` 하나를 정기 수집(끝 = KST 오늘)과 분할 합산(끝 = KST 어제)이 함께 쓴다
+- 분할 합산은 **완료 알림 방식**이다(3.3절, 개정 17): `collector-completeness`가 원천마다 같은 실행에서 **단일 창을 먼저 1회 + 같은 창의 월 분할**(창 끝 = KST 어제, 워크로드 시작 때 고정)을 받아 원문을 저장하고(**`raw.fetched`는 내지 않는다**), 원천을 마치면 `completeness.collected`(받은 원문 목록만). tag = `cmp_{실행 키}_single_…`/`cmp_{실행 키}_part_…`. 공용 수집 함수는 `collector/_completeness.py`. 정선은 월 분할이 13개라 실행당 원문 14개. 비교·판정은 `common-core`(검사기)

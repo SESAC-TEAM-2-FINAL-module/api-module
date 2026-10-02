@@ -30,6 +30,18 @@ _ZERO_SENTINEL_METRICS = {"water_temp", "salinity"}
 class TideProcessorAdapter:
     api_id = API_ID
 
+    def __init__(self) -> None:
+        self._flatline_minutes: float | None = None
+        self._configured = False
+
+    def configure(self, definitions: dict, operational: dict) -> None:
+        """기동 시 한 번 — 운영 조정 tide.flatline_minutes를 받는다 (2.0.6절). 없으면 멈춘다"""
+        value = (operational.get("tide") or {}).get("flatline_minutes")
+        if value is None:
+            raise SystemExit("운영 조정 tide.flatline_minutes 없음 — 값 멈춤 감지를 끈 채 기동하지 않는다")
+        self._flatline_minutes = value
+        self._configured = True
+
     def interpret(self, pr: ParsedResponse, raw_meta: dict) -> list[dict]:
         """items → (station_id, observed_at_utc, metric, _raw_value) 행"""
         rows: list[dict] = []
@@ -56,8 +68,10 @@ class TideProcessorAdapter:
 
     def normalize(self, rows: list[dict]) -> list[dict]:
         """0.000 결측, 값 멈춤 플래그, STATION_INACTIVE 판정"""
-        # 운영 조정: tide.flatline_minutes (값 미결 — 환경변수로 로드)
-        flatline_minutes = _load_flatline_minutes()
+        # 운영 조정: tide.flatline_minutes — configure()로 기동 시 받는다. 받지 않았으면 멈춘다
+        if not self._configured:
+            raise RuntimeError("TideProcessorAdapter.configure() 전에 normalize() 호출 — 운영 조정 미주입")
+        flatline_minutes = self._flatline_minutes
 
         for row in rows:
             raw_val = row.pop("_raw_value", None)
@@ -66,12 +80,33 @@ class TideProcessorAdapter:
             row["value"] = value
             row["missing_reason"] = missing_reason
 
-        if flatline_minutes is not None:
-            _apply_flatline_flags(rows, flatline_minutes)
+        _apply_flatline_flags(rows, flatline_minutes)
 
         _apply_station_inactive(rows)
 
         return rows
+
+
+    def stations(self, pr: ParsedResponse) -> list[dict]:
+        """
+        관측소 마스터 행 (5.3절, 결정 D5) — 원문의 좌표로. 경도 필드는 `lot`(1.2절, 오타 아님).
+        좌표가 없거나 숫자가 아니면 그 관측소는 내지 않는다. active는 processor가 STATION_INACTIVE로 정한다
+        """
+        out: dict[str, dict] = {}
+        for item in pr.items:
+            code = item.get("obsCode") or item.get("obsCd") or ""
+            if not code:
+                continue
+            try:
+                lat, lng = float(item.get("lat")), float(item.get("lot"))
+            except (TypeError, ValueError):
+                continue
+            out[f"tide:{code}"] = {
+                "id": f"tide:{code}", "source_api": "tide",
+                "name": item.get("obsName") or item.get("obsPostName"),
+                "lat": lat, "lng": lng, "sea_area": None, "active": True,
+            }
+        return list(out.values())
 
 
 # ── 헬퍼 ────────────────────────────────────────────────────────────────────
@@ -101,20 +136,6 @@ def _parse_value(raw_val, metric: str) -> tuple[float | None, str | None]:
     if v == 0.0 and metric in _ZERO_SENTINEL_METRICS:
         return None, "ZERO_SENTINEL"
     return v, None
-
-
-def _load_flatline_minutes() -> int | None:
-    """tide.flatline_minutes 운영 조정 값 로드. <미결>이면 None"""
-    import os
-    env_path = os.environ.get("OPERATIONAL_CONFIG_PATH")
-    if not env_path:
-        return None
-    try:
-        from common.config import load_operational
-        cfg = load_operational(env_path)
-        return cfg.get("tide", {}).get("flatline_minutes")
-    except SystemExit:
-        return None
 
 
 def _apply_flatline_flags(rows: list[dict], flatline_minutes: int) -> None:

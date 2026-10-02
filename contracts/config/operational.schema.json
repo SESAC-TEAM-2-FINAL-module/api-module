@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "operational-v1",
+  "description": "운영 조정 ConfigMap 스키마 (2.0.6절). chlorophyll은 판정 정의이므로 stale_threshold_hours에 올 수 없다.",
+  "type": "object",
+  "required": ["schema", "typhoon_active", "tide", "stale_threshold_hours", "evaluation"],
+  "additionalProperties": false,
+  "properties": {
+    "typhoon_active": {
+      "type": "boolean",
+      "description": "태풍 특보 중 R4 급변 면제 플래그 — 운영자 수동 토글. 필수 키 (2.0.6절, 개정 13)"
+    },
+    "schema": {
+      "type": "string",
+      "const": "operational-v1"
+    },
+    "tide": {
+      "type": "object",
+      "required": ["flatline_minutes"],
+      "additionalProperties": false,
+      "properties": {
+        "flatline_minutes": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "값 멈춤 감지 N분 (계획서 A2)"
+        }
+      }
+    },
+    "stale_threshold_hours": {
+      "type": "object",
+      "required": [
+        "water_temp",
+        "red_tide_bulletin",
+        "salinity_tide",
+        "tide_level",
+        "wind_speed",
+        "air_temp",
+        "dissolved_oxygen"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "water_temp": {
+          "type": "number",
+          "exclusiveMinimum": 0.2567,
+          "description": "dtRecent 최장 갱신 간격(15.4분) 초과 요구 *(제안)*"
+        },
+        "red_tide_bulletin": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "salinity_tide": {
+          "type": "number",
+          "exclusiveMinimum": 0.2567
+        },
+        "tide_level": {
+          "type": "number",
+          "exclusiveMinimum": 0.2567
+        },
+        "wind_speed": {
+          "type": "number",
+          "exclusiveMinimum": 0.2567
+        },
+        "air_temp": {
+          "type": "number",
+          "exclusiveMinimum": 0.2567
+        },
+        "dissolved_oxygen": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "required": ["interpolation_stale_minutes", "grading_stale_minutes"],
+      "additionalProperties": false,
+      "properties": {
+        "interpolation_stale_minutes": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "grading_stale_minutes": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    }
+  }
+}

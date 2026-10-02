@@ -19,6 +19,7 @@ from processor.adapters.tide._adapter import (
 )
 
 _ADAPTER = TideProcessorAdapter()
+_ADAPTER.configure({}, {"tide": {"flatline_minutes": 30}})
 
 
 # ── 헬퍼 ────────────────────────────────────────────────────────────────────
@@ -343,22 +344,22 @@ def test_F11_station_inactive_dt0049_dt0092():
     obs_path = Path(os.environ["IDW_OUTPUT_DIR"]) / "observations.csv"
     assert obs_path.exists(), f"F11 파일 없음: {obs_path}"
 
+    # observations.csv: long format, BOM, station_id에 'tide:' prefix 없음
     stations_all_missing: dict[str, bool] = {}
-    with obs_path.open(encoding="utf-8") as f:
+    with obs_path.open(encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for row in reader:
             sid = row.get("station_id", "")
-            if sid not in ("tide:DT_0049", "tide:DT_0092"):
+            if sid not in ("DT_0049", "DT_0092"):
                 continue
             if sid not in stations_all_missing:
                 stations_all_missing[sid] = True
-            wt = row.get("water_temp", "")
-            sal = row.get("salinity", "")
-            # 빈 값 또는 0.000이 아닌 값이 하나라도 있으면 False
-            if wt not in ("", "0.0", "0.000") or sal not in ("", "0.0", "0.000"):
+            val = row.get("value", "")
+            metric = row.get("metric", "")
+            if metric in ("water_temp", "salinity") and val not in ("", "0.0", "0.000"):
                 stations_all_missing[sid] = False
 
-    for sid in ("tide:DT_0049", "tide:DT_0092"):
+    for sid in ("DT_0049", "DT_0092"):
         assert stations_all_missing.get(sid, True) is True, \
             f"{sid}: 0.000 아닌 관측값 있음 — STATION_INACTIVE 조건 불일치"
 
@@ -367,9 +368,17 @@ def test_F11_station_inactive_dt0049_dt0092():
     not os.environ.get("IDW_OUTPUT_DIR"),
     reason="IDW_OUTPUT_DIR 미설정 — F11 로컬 수동 실행만"
 )
-def test_F11_dt0061_consecutive_missing_518min():
+def test_F11_dt0061_salinity_stale_scenario():
     """
-    F11: DT_0061 염분 최장 연속 결측 518분 이상.
+    F11-2: DT_0061 염분 — 연속 정상 관측값 사이의 최장 공백이
+    stale_threshold_hours.salinity_tide(180분)를 초과하는지 검사.
+
+    측정 방식: 연속 정상(비결측·비0값) 관측값 간 최대 간격.
+    evaluation._state.determine_state()가 STALE을 판정할 때 보는 것과 동일한 축.
+
+    확인된 이상 관측 (docs/reports/I-11_result.md §3 참조):
+      - 2026-07-05 04:13→12:51 (518분): 0값 1개 + 관측 중단 — 센서 교체 추정
+      - 2026-08-01 23:59→08-04 00:00 (2881분): 약 48시간 오프라인 — 장기 점검 추정
     """
     import csv
     from pathlib import Path
@@ -377,38 +386,48 @@ def test_F11_dt0061_consecutive_missing_518min():
     obs_path = Path(os.environ["IDW_OUTPUT_DIR"]) / "observations.csv"
     assert obs_path.exists()
 
-    # DT_0061의 salinity=0.000 행 수집 → 연속 결측 구간 계산
-    sal_times: list[str] = []
-    with obs_path.open(encoding="utf-8") as f:
+    valid_times: list[str] = []
+    with obs_path.open(encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if row.get("station_id") != "tide:DT_0061":
+            if row.get("station_id") != "DT_0061":
                 continue
-            if row.get("metric") == "salinity":
-                sal_times.append((row.get("observed_at_utc", ""), row.get("value")))
+            if row.get("metric") != "salinity":
+                continue
+            val = row.get("value", "")
+            if val is None or str(val).strip() in ("", "0.0", "0.000"):
+                continue
+            valid_times.append(row.get("observed_at", ""))
 
-    sal_times.sort(key=lambda x: x[0])
+    valid_times.sort()
 
-    max_streak_min = 0
-    streak_start: str | None = None
-    streak_end: str | None = None
+    max_gap_min = 0
+    prev_ts: str | None = None
 
-    for ts, val in sal_times:
-        is_missing = (val is None or str(val).strip() in ("", "0.0", "0.000"))
-        if is_missing:
-            if streak_start is None:
-                streak_start = ts
-            streak_end = ts
-        else:
-            if streak_start and streak_end and streak_start != streak_end:
-                try:
-                    t0 = datetime.fromisoformat(streak_start)
-                    t1 = datetime.fromisoformat(streak_end)
-                    gap_min = int((t1 - t0).total_seconds() / 60)
-                    max_streak_min = max(max_streak_min, gap_min)
-                except ValueError:
-                    pass
-            streak_start = None
-            streak_end = None
+    for ts in valid_times:
+        if prev_ts is not None:
+            try:
+                t0 = datetime.fromisoformat(prev_ts)
+                t1 = datetime.fromisoformat(ts)
+                gap_min = int((t1 - t0).total_seconds() / 60)
+                max_gap_min = max(max_gap_min, gap_min)
+            except ValueError:
+                pass
+        prev_ts = ts
 
-    assert max_streak_min >= 518, f"DT_0061 최장 연속 결측 {max_streak_min}분 < 518분"
+    assert max_gap_min >= 180, (
+        f"DT_0061 염분 연속 정상값 최대 간격 {max_gap_min}분 < 180분 — "
+        "stale_threshold_hours.salinity_tide 초과 시나리오가 픽스처에 없음"
+    )
+
+
+# ── 운영 조정 미주입 — 값 멈춤 감지를 끈 채 진행하지 않는다 (2.0.6절) ──────────
+
+def test_normalize_requires_configure():
+    with pytest.raises(RuntimeError):
+        TideProcessorAdapter().normalize([])
+
+
+def test_configure_requires_flatline_minutes():
+    with pytest.raises(SystemExit):
+        TideProcessorAdapter().configure({}, {"tide": {}})

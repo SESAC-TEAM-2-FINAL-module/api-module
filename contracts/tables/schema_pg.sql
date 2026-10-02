@@ -6,7 +6,7 @@ CREATE TABLE adapter_health (
 	last_success_utc TIMESTAMP WITHOUT TIME ZONE, 
 	last_failure_utc TIMESTAMP WITHOUT TIME ZONE, 
 	consecutive_failures INTEGER NOT NULL, 
-	retry_recovered BOOLEAN NOT NULL, 
+	retry_recovered INTEGER NOT NULL, 
 	CONSTRAINT pk_adapter_health PRIMARY KEY (adapter)
 );
 
@@ -78,6 +78,33 @@ CREATE TABLE bulletins (
 	CONSTRAINT ck_bulletins_grade CHECK (grade IN ('NONE', 'PRE_ADVISORY', 'ADVISORY', 'WARNING', 'NOT_GRADED', 'UNKNOWN'))
 );
 
+CREATE TABLE completeness_checks (
+	run_key VARCHAR(64) NOT NULL, 
+	api VARCHAR(64) NOT NULL, 
+	window_start DATE NOT NULL, 
+	window_end DATE NOT NULL, 
+	parts INTEGER NOT NULL, 
+	single_count INTEGER, 
+	split_sum INTEGER, 
+	truncated_side VARCHAR(16), 
+	status VARCHAR(32) NOT NULL, 
+	reason VARCHAR(32), 
+	checked_at_utc TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	CONSTRAINT pk_completeness_checks PRIMARY KEY (run_key, api), 
+	CONSTRAINT ck_completeness_checks_status CHECK (status IN ('OK', 'INCOMPLETE', 'COMPARISON_RANGE_MISMATCH', 'INVALID')), 
+	CONSTRAINT ck_completeness_checks_reason CHECK (reason IN ('PART_STATUS', 'FILTER_IGNORED', 'WINDOW_MISMATCH', 'RAW_MISSING')), 
+	CONSTRAINT ck_completeness_checks_truncated_side CHECK (truncated_side IN ('SINGLE', 'SPLIT'))
+);
+
+CREATE TABLE farm_areas (
+	farm_id VARCHAR(64) NOT NULL, 
+	area_id VARCHAR(64), 
+	distance_km DOUBLE PRECISION, 
+	rule VARCHAR(64) NOT NULL, 
+	computed_at_utc TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	CONSTRAINT pk_farm_areas PRIMARY KEY (farm_id)
+);
+
 CREATE TABLE farm_reading_history (
 	farm_id VARCHAR(64) NOT NULL, 
 	axis VARCHAR(64) NOT NULL, 
@@ -98,7 +125,7 @@ CREATE TABLE farm_reading_history (
 	computed_at_utc TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
 	CONSTRAINT ck_farm_reading_history_axis CHECK (axis IN ('water_temp', 'salinity', 'tide_level', 'wind_speed', 'air_temp', 'red_tide', 'dissolved_oxygen', 'chlorophyll')), 
 	CONSTRAINT ck_farm_reading_history_derivation CHECK (derivation IN ('COMPUTED', 'MEASURED', 'OFFICIAL', 'SURVEY')), 
-	CONSTRAINT ck_farm_reading_history_provenance CHECK (provenance IN ('NONE', 'OBSERVED', 'NEAREST', 'INTERPOLATED', 'OFFICIAL', 'SURVEY')), 
+	CONSTRAINT ck_farm_reading_history_provenance CHECK (provenance IN ('NONE', 'OBSERVED', 'NEAREST', 'BASELINE', 'INTERPOLATED', 'OFFICIAL', 'SURVEY')), 
 	CONSTRAINT ck_farm_reading_history_grade CHECK (grade IN ('NONE', 'PRE_ADVISORY', 'ADVISORY', 'WARNING', 'NOT_GRADED', 'UNKNOWN'))
 );
 
@@ -121,7 +148,7 @@ CREATE TABLE farm_readings (
 	computed_at_utc TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
 	CONSTRAINT ck_farm_readings_axis CHECK (axis IN ('water_temp', 'salinity', 'tide_level', 'wind_speed', 'air_temp', 'red_tide', 'dissolved_oxygen', 'chlorophyll')), 
 	CONSTRAINT ck_farm_readings_derivation CHECK (derivation IN ('COMPUTED', 'MEASURED', 'OFFICIAL', 'SURVEY')), 
-	CONSTRAINT ck_farm_readings_provenance CHECK (provenance IN ('NONE', 'OBSERVED', 'NEAREST', 'INTERPOLATED', 'OFFICIAL', 'SURVEY')), 
+	CONSTRAINT ck_farm_readings_provenance CHECK (provenance IN ('NONE', 'OBSERVED', 'NEAREST', 'BASELINE', 'INTERPOLATED', 'OFFICIAL', 'SURVEY')), 
 	CONSTRAINT ck_farm_readings_grade CHECK (grade IN ('NONE', 'PRE_ADVISORY', 'ADVISORY', 'WARNING', 'NOT_GRADED', 'UNKNOWN'))
 );
 
@@ -247,11 +274,13 @@ CREATE TABLE stations (
 
 CREATE TABLE survey_observations (
 	station_id VARCHAR(64) NOT NULL, 
+	observed_at_utc TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
 	surveyed_on DATE NOT NULL, 
 	layer VARCHAR(4) NOT NULL, 
 	metric VARCHAR(64) NOT NULL, 
 	value DOUBLE PRECISION, 
 	missing_reason VARCHAR(64), 
+	flags JSON, 
 	raw_id BIGINT, 
 	CONSTRAINT ck_survey_observations_layer CHECK (layer IN ('S', 'B'))
 );

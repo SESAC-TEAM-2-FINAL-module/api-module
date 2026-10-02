@@ -5,9 +5,16 @@ DB 접근 계층 추상 인터페이스 (5.4절).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import AbstractContextManager
 
 
 class AbstractRepository(ABC):
+    # ── 트랜잭션 ─────────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def transaction(self) -> AbstractContextManager["AbstractRepository"]:
+        """여러 쓰기를 한 트랜잭션으로 묶는 컨텍스트 — 블록 안에서는 돌려받은 저장소만 쓴다."""
+
     # ── collector ────────────────────────────────────────────────────────────
 
     @abstractmethod
@@ -34,7 +41,7 @@ class AbstractRepository(ABC):
 
     @abstractmethod
     def upsert_survey_observations(self, rows: list[dict]) -> None:
-        """고유 (station_id, surveyed_on, layer, metric) 기준 upsert."""
+        """고유 (station_id, observed_at_utc, layer, metric) 기준 upsert — 조사 시각이 키 (개정 14)."""
 
     @abstractmethod
     def upsert_bulletins(self, rows: list[dict]) -> None:
@@ -182,10 +189,72 @@ class AbstractRepository(ABC):
     def get_interpolation_weights_by_run(self, run_id: str) -> list[dict]:
         """run_id에 속한 가중치 행 전체 — (farm_id, station_id, weight, distance_km)."""
 
+    # ── evaluation 읽기 ───────────────────────────────────────────────────────
+
+    @abstractmethod
+    def get_farm_readings(self, farm_ids: list[str] | None = None) -> list[dict]:
+        """farm_readings 현재값. farm_ids가 있으면 해당 양식장만, 없으면 전체."""
+
+    @abstractmethod
+    def get_axis_coverage(self) -> list[dict]:
+        """axis_coverage 전체 — 커버리지·계절 선언."""
+
+    @abstractmethod
+    def get_adapter_health(self) -> list[dict]:
+        """adapter_health 전체 — 어댑터별 마지막 성공·실패 시각."""
+
+    @abstractmethod
+    def get_publication_checks(self, axis: str | None = None) -> list[dict]:
+        """publication_checks. axis가 있으면 해당 축만, 없으면 전체."""
+
+    @abstractmethod
+    def get_latest_interpolation_ref_time(self, metric: str) -> dict | None:
+        """metric의 가장 최근 interpolation_runs 행 — ref_time_utc, computed_at_utc. 없으면 None."""
+
+    @abstractmethod
+    def get_latest_ingest_processed_at(self) -> object:
+        """MAX(ingest_runs.processed_at_utc) — GRADING_STALE 기준. 행 없으면 None."""
+
+    @abstractmethod
+    def get_axis_status(self, farm_ids: list[str] | None = None) -> list[dict]:
+        """axis_status 현재값. farm_ids가 있으면 해당 양식장만, 없으면 전체. basis_utc 비교용."""
+
+    @abstractmethod
+    def get_latest_ingest_result_by_adapter(self, adapter: str) -> dict | None:
+        """수집 원천(adapter, 예: tide)의 가장 최근 ingest_runs 행 — raw_index.api가 그 원천의 api_id(변형 접미 포함)인 것. 없으면 None."""
+
+    @abstractmethod
+    def get_ingest_runs_for_raw(self, raw_id: int) -> list[dict]:
+        """원문 하나(raw_index.id)의 ingest_runs 행 전부 — 중복 알림·재처리 판별용 (I-12)."""
+
+    @abstractmethod
+    def get_unmapped_locations(self, area_keys: list[str]) -> list[dict]:
+        """검토 큐 행 — 횟수·처음 시각을 이어 쓰기 위해 읽는다 (4.3절, I-12)."""
+
+    @abstractmethod
+    def upsert_farm_areas(self, rows: list[dict]) -> None:
+        """고유 farm_id 기준 upsert — 모듈이 정한 양식장 해역 (개정 15)."""
+
+    @abstractmethod
+    def get_raw_index_range(self, id_from: int, id_to: int) -> list[dict]:
+        """raw_index.id가 [id_from, id_to]인 색인 행, id 순 — reprocess 범위 (2.1절, 개정 15)."""
+
+    @abstractmethod
+    def get_completeness_check(self, run_key: str, api: str) -> dict | None:
+        """분할 합산 결과 한 행 (3.3절, 개정 17)."""
+
+    @abstractmethod
+    def upsert_completeness_checks(self, rows: list[dict]) -> None:
+        """고유 (run_key, api) 기준 upsert."""
+
+    @abstractmethod
+    def get_latest_completeness_checked(self) -> dict[str, object]:
+        """원천(api)별 최신 checked_at_utc."""
+
     # ── 기동 시 검사 ──────────────────────────────────────────────────────────
 
     @abstractmethod
-    def check_schema(self) -> None:
+    def check_schema(self, include: tuple[str, ...] = ()) -> None:
         """
         tables.py 모델과 실제 DB 스키마를 비교한다.
         테이블·컬럼이 다르면 SystemExit으로 기동을 멈추고 차이를 보고한다 (B4).

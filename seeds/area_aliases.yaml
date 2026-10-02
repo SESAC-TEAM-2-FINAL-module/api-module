@@ -1,7 +1,77 @@
-# area_aliases — 정규화 별칭 테이블 (S12 이전 내용 미결 — 계획서 11절)
-# 형식:
-#   alias_key: 정규화 키 (txt_seas 1~3단계 결과 또는 오타 원문 strip 결과)
-#   area_id:   연결 해역 ID (areas.area_id)
-#   source:    등록 출처
+# area_aliases — txt_seas 정규화(1~3단계) + 분리(4~5단계) 후 키 → area_id
+# 확정 2026-10-01. R1·R3 픽스처 분석 결과 채택 (계획서 11절)
+# alias_key: _normalize_txt_seas_1_3 + _split_txt_seas_4_5 통과 후 실제로 나오는 문자열
+aliases:
+  # ── 경남 통영 ──────────────────────────────────────────────────────────────
+  - alias_key: "경남 통영"
+    area_id: "gyeongnam_tongyeong"
+    source: "r1_r3_fixtures"
 
-aliases: []
+  # 산양읍 = 통영시 산양읍. "및" 분리 이후 prefix 없는 지명.
+  # NIFS 적조 정보 해역도 시각 확인 완료 (20260930). 사용자 채택 2026-09-30.
+  - alias_key: "산양읍 장군봉 내만"
+    area_id: "gyeongnam_tongyeong"
+    source: "r1_r3_fixtures"
+
+  - alias_key: "산양읍 풍화리 월명도 북측"
+    area_id: "gyeongnam_tongyeong"
+    source: "r1_r3_fixtures"
+
+  # ── 경남 거제 ──────────────────────────────────────────────────────────────
+  - alias_key: "경남 거제"
+    area_id: "gyeongnam_geoje"
+    source: "r1_r3_fixtures"
+
+  # ── 경남 사천 ──────────────────────────────────────────────────────────────
+  - alias_key: "경남 사천"
+    area_id: "gyeongnam_sacheon"
+    source: "r1_r3_fixtures"
+
+  # ── 경남 남해 ──────────────────────────────────────────────────────────────
+  - alias_key: "경남 남해"
+    area_id: "gyeongnam_namhae"
+    source: "r1_r3_fixtures"
+
+  # "경남 남해군 미조~상주" → 4단계 분리 후 양 끝 지점
+  - alias_key: "경남 남해군 미조"
+    area_id: "gyeongnam_namhae"
+    source: "r1_r3_fixtures"
+
+  - alias_key: "경남 남해군 상주"
+    area_id: "gyeongnam_namhae"
+    source: "r1_r3_fixtures"
+
+  - alias_key: "경남 남해군 미조면 조도"
+    area_id: "gyeongnam_namhae"
+    source: "r1_r3_fixtures"
+
+  # ── 전남 여수 ──────────────────────────────────────────────────────────────
+  - alias_key: "전남 여수"
+    area_id: "jeonnam_yeosu"
+    source: "r1_r3_fixtures"
+
+  # "보돌바다"는 여수 인근 해역 명칭. 3단계로는 제거되지 않으므로 별칭으로 처리.
+  - alias_key: "전남 여수 보돌바다"
+    area_id: "jeonnam_yeosu"
+    source: "r1_r3_fixtures"
+
+  # ── 전남 득량만 ────────────────────────────────────────────────────────────
+  - alias_key: "전남 득량만"
+    area_id: "jeonnam_deukryang"
+    source: "r1_r3_fixtures"
+
+  # "전남 득량만 해역" → 3단계 "해역" 제거 → "전남 득량만" (위 항목으로 처리됨)
+
+  # ── 전남 여자만 ────────────────────────────────────────────────────────────
+  - alias_key: "전남 여자만"
+    area_id: "jeonnam_yeoja"
+    source: "r1_r3_fixtures"
+
+  # ── 전남 고흥 ──────────────────────────────────────────────────────────────
+  - alias_key: "전남 고흥"
+    area_id: "jeonnam_goheung"
+    source: "r1_r3_fixtures"
+
+  - alias_key: "전남 고흥군 금산"
+    area_id: "jeonnam_goheung"
+    source: "r1_r3_fixtures"

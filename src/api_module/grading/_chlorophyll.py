@@ -1,13 +1,13 @@
 """
 클로로필a 어장환경 조사값 선택 (4.8절).
-거리 한계 안 최근 표층(CHL_S) 조사값.
+거리 한계 안 최근 표층 조사값 — 원문 필드 `CHL_S`, 저장 층 값 `S`(survey_observations.layer).
 fishery_max_distance_km <미결> → NONE(NO_INPUT).
 """
 from __future__ import annotations
 
 from common.geo import haversine
 
-_SURFACE_LAYER = "CHL_S"
+SURFACE_LAYER = "S"   # survey_observations.layer — 원문 필드 이름(CHL_S)이 아니다 (2026-10-02 점검 C1)
 
 
 def _is_pending(val: object) -> bool:
@@ -22,7 +22,7 @@ def find_chlorophyll_obs(
     max_distance_km: object,
 ) -> dict | None:
     """
-    survey_obs: get_latest_survey_obs(metric="chlorophyll", layer=CHL_S) 결과.
+    survey_obs: get_latest_survey_obs(metric="chlorophyll", layer=SURFACE_LAYER) 결과.
     Returns obs_row + distance_km, or None (NO_INPUT).
     """
     if _is_pending(max_distance_km):

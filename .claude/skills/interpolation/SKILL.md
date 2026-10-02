@@ -48,7 +48,7 @@ description: "IDW 수온 추정과 오늘의 오차 — src/api_module/interpola
 | 입력 | 최신 수온 관측값 + 양식장 좌표(1.6절) | |
 | 사용 관측소 | `STATION_INACTIVE`·결측·`SENSOR_QUALITY`(4.6절 R3·R4) 제외, `STALE_SUSPECT`는 설정에 따름(4.1절). 기준 시각 이전 **정렬 창**(설정값, 기본 30분) 안의 최신값만. **기준 시각 = 이 실행을 시작시킨 `obs.loaded`의 `observed_to_utc`**(그 적재의 가장 늦은 관측 시각) → `interpolation_runs.ref_time_utc`. 알림에 있는 값이라 같은 알림이 두 번 와도 같다 | 관측소별 갱신 간격 3.6~15.4분 |
 | 방법 | 거리 역제곱(p=2), 가까운 **N=5** — **설정값** | v1.5 권장 `M2` N=5. `B2`(단순평균) N=2 승격은 미결(11절) |
-| 제외 구역 | 섬진강하구 인접 등 **제외 구역**(판정 정의 `grading.excluded_zones`, 값 `<미결>` — 중심·반경 목록) 안 양식장도 추정값은 계산해 저장한다. **이 단계는 제외 구역을 보지 않는다** — 구역 판단과 `provenance = NONE`(사유 `EXCLUDED_ZONE` — 검증 범위 밖)은 `grading`이 양식장 좌표로 한다(4.8절) | v1.5 6.2절 |
+| 제외 구역 | 섬진강하구 인접 등 **제외 구역**(판정 정의 `grading.excluded_zones` — 중심·반경 목록. 채택 2026-09-30: `seomjin_estuary` 35.00N·127.73E 반경 15km) 안 양식장도 추정값은 계산해 저장한다. **이 단계는 제외 구역을 보지 않는다** — 구역 판단과 `provenance = NONE`(사유 `EXCLUDED_ZONE` — 검증 범위 밖)은 `grading`이 양식장 좌표로 한다(4.8절) | v1.5 6.2절 |
 | 가중치 기록 | 관측소별 거리·가중치를 매 실행 저장 | "근거 보기"용. 가막만 예시에서 최근접 1곳이 약 87% |
 | **오늘의 오차** | 최근 **N일**(설정값, 결과 보기 전 고정) 관측으로 **관측소 하나씩 빼고 맞히는 교차검증**을 돌려 절대오차 **P95**를 산출. 하루 1회 갱신 — `interpolation-error` 워크로드(2.1절) | v1.5 4.7절 조건 ④ |
 | 관측소 집합이 바뀔 때 | 그 실행에 쓰인 **관측소 집합 기준으로 오차를 다시 구한다**(집합별 캐시). 가까운 관측소가 빠지면 오차가 자연히 커지고, 한계를 넘으면 4.8절에서 `NONE` | v1.5 S6 — 처리 방식은 팀 결정 전까지 v1.5 4.6.1절 기준을 그대로 따름 |
@@ -64,12 +64,12 @@ interpolation.method: M2                # 기본값 — B2 승격 결정 대기 
 interpolation.power_p: 2
 interpolation.n_neighbors: 5            # 기본값 — 같음
 interpolation.align_window_min: 30      # 기본값 — 결정 대기 (11절)
-interpolation.exclude_flatline: <미결>
-interpolation.error_window_days: <결과 보기 전 고정>
+interpolation.exclude_flatline: true    # 채택 2026-09-30 (4.1절)
+interpolation.error_window_days: 30     # 결과 보기 전 고정 — 채택 2026-09-30
 ```
 
 - 결정 대기인 기본값(`method`·`n_neighbors`·`align_window_min`)은 **기본값으로 구현**하고, 바뀌어도 코드가 그대로 돌게 한다 — `B2`(단순평균) 승격이 결정되면 설정만 바뀐다
-- `exclude_flatline`은 `<미결>`, `error_window_days`는 **결과를 보기 전에 고정**해야 하는 값이다. 값을 채우지 않는다. 교차검증 결과를 보고 창을 고르면 오차를 좋게 보이도록 고른 것이 된다
+- `exclude_flatline`은 `true`, `error_window_days`는 30으로 채택됐다(2026-09-30, 계획서 개정 11). `error_window_days`는 **결과를 보기 전에 고정**해야 하는 값이다 — 바꾸려면 계획서 개정으로 한다. 교차검증 결과를 보고 창을 고르면 오차를 좋게 보이도록 고른 것이 된다
 
 ### ③-3 저장과 알림 (5.3·2.2절)
 
@@ -135,7 +135,7 @@ interpolation.error_window_days: <결과 보기 전 고정>
 | --- | --- | --- | --- |
 | Q7 | IDW 입력 필터 (4.7) | 관측소 A는 `SENSOR_QUALITY`, B는 정렬 창 밖(창 + 1분), C는 창 안 | A·B는 `interpolation_weights`에 없고 C만 쓰인다 |
 
-- **F12와 P9는 CI 게이트 밖이다**(실측 가공 CSV가 필요). S8에서 **로컬 수동 실행**으로 확인하고 S12에서 다시 돌린다(7.1절). 입력은 `fixtures/derived/`의 경로 참조와 해시 — 원본은 `$SRC_IDW/output/observations.csv`
+- **F12와 P9는 CI 게이트 밖이다**(실측 가공 CSV가 필요). S8에서 **로컬 수동 실행**으로 확인하고 S12에서 다시 돌린다(7.1절). 입력은 `fixtures/derived/`의 경로 참조와 해시 — 원본은 `$SRC_IDW/output/observations.csv`(IDW 보간 입력 전용 — `water_temp`·`salinity`만, 6.2절)
 - **P1은 게이트 안**이다 — `fixtures/derived/stations.csv`와 `fixtures/synthetic/farms.csv`만 쓴다
 - 관련 검사(다른 skill 소유): P3(추정 정지 → `NONE`) — `evaluation` / P4(오차 → 등급)·P8(제외 구역) — `grading` / Q5(값 멈춤 플래그) — `tide`
 

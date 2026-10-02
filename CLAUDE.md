@@ -14,7 +14,7 @@
 
 **충돌할 때의 우선순위** (A.1)
 
-1. **이 파일의 실행자 규칙과 금지 규칙**(아래 2·3번 항목)이 최우선이다. 지시서 머리말이 **명시적으로 해제한 것만** 예외다 — 현재 I-11의 공공 API 호출 하나
+1. **이 파일의 실행자 규칙과 금지 규칙**(아래 2·3번 항목)이 최우선이다. 지시서 머리말이 **명시적으로 해제한 것만** 예외다 — 현재 I-11·I-13의 공공 API 호출
 2. 그 밖의 사실·방법은 **수정사항 > 지시서 > skill > 이 파일의 공용 용어** 순이다. 수정사항은 그 지시서 실행에만 적용되고 계획서를 바꾸지 않는다
 3. 수정사항 밖에서 파일끼리, 또는 파일과 계획서가 다르면 **갱신 누락**이다. 어느 쪽도 고르지 말고 **멈춰 차이를 보고**한다
 
@@ -26,7 +26,7 @@
 - ***(제안)* 표시는 구현하되 확정으로 다루지 않는다.** 보고서 "계획서 반영 후보"에 그 항목을 적는다
 - **결정하지 않는다** — 채택·폐기·임계값·표시 정책은 "제안만"
 - **인증키 값과 DB 연결 문자열(비밀번호 포함)을 읽어 출력하지 않는다.** 명령·로그·보고서·커밋에 나오면 안 된다. 원문 키 검사는 **고정 스크립트 `ci/scan_keys.py`로만** 하고, 결과는 일치 건수만 보고한다
-- **공공 API를 호출하지 않는다.** 이 금지는 **지시서 머리말의 명시적 선언으로만** 해제된다 (현재 I-11만). 실행자가 스스로 추론해 해제하지 않는다
+- **공공 API를 호출하지 않는다.** 이 금지는 **지시서 머리말의 명시적 선언으로만** 해제된다 (현재 I-11·I-13만). 실행자가 스스로 추론해 해제하지 않는다
 - **판단에 필요한 사실은 계획서의 값으로 쓴다.** 계획서에 값이 없고 외부 문서(v1.5 등) 절 번호만 있으면, 추정하지 않고 멈춰 보고한다
 
 ---
@@ -75,7 +75,7 @@
 | 설정 | 세 종류로 나눈다 (2.0.6절). **판정 정의**는 `config/definitions.yaml` — 이미지에 포함, CI 게이트가 대조. **운영 조정**은 ConfigMap — 인계 후 인프라 소유, 초기값은 `config/operational.initial.yaml`. **워크로드 설정**(CronJob 주기 등)은 `handoff/HANDOFF.md`에 권장값으로만 |
 | 계획서·지시서·보고 | `docs/plan/`, `docs/instructions/`, `docs/reports/` |
 | 이미지 이름 | `api-module/collector`·`processor`·`interpolation`·`grading`·`evaluation` (2.1절) |
-| Dockerfile | **`docker/<이미지>/Dockerfile`** — 이미지마다 하나. 공통 코드·`config/definitions.yaml`과 해당 단계 코드만 복사한다. **`evaluation`은 운영 조정 게이트용 합성 픽스처(`fixtures/synthetic/`)도** 복사한다(2.0.6절). 운영 조정 값은 이미지에 넣지 않는다 |
+| Dockerfile | **`docker/<이미지>/Dockerfile`** — 이미지마다 하나. 공통 코드·`config/definitions.yaml`과 해당 단계 코드만 복사한다. **`evaluation`은 운영 조정 게이트용 합성 픽스처(`fixtures/synthetic/`)도** 복사한다(2.0.6절). **`processor`·`evaluation`은 운영 조정 스키마(`contracts/config/operational.schema.json` — 기동 시 검사용 계약, 값 아님)를, `processor`는 적조 해역 시드(`seeds/` — 별칭 정규화, 4.3절)도** 복사한다. 운영 조정 값은 이미지에 넣지 않는다 |
 | 의존성 | `pyproject.toml`의 **이미지별 선택 의존성**으로. 한 단계의 라이브러리 갱신이 다른 이미지에 번지지 않게 한다 |
 | k8s 리소스 이름 | 2.1절 표 |
 | 레지스트리 주소 | 코드·매니페스트에 쓰지 않는다. **CI 변수 `REGISTRY` 하나**로 둔다 — 현재 GitLab Container Registry, ECR 전환 가능 |
@@ -173,11 +173,12 @@
 | `provenance` | 영역 판정 — 오차·방법 기준 등급. `NONE`은 **신뢰 기준 밖** | 배지. `NONE`이 "값 없음"을 뜻하지 않는다 |
 | `none_reason` | `grading`이 기록한 `NONE` 사유 | 화면 표시용 사유가 아니다 — 표시는 `axis_status.reason` |
 | `lower` · `upper` | 수온: `value` ∓ 오늘의 오차 P95 | 최솟값·최댓값이 아니다 |
-| `source_ref` | 근거 원천 행의 키 — 수온 `run_id` / 인근 실측 `station_id` / DO·클로로필 `station_id@surveyed_on` / 적조 `cod_news#seq` | 사람이 읽는 설명이 아니다 |
+| `source_ref` | 근거 원천 행의 키 — 수온 `run_id` / 인근 실측 `station_id` / DO·클로로필 `station_id@observed_at_utc`(조사·관측 시각, UTC ISO — 개정 14) / 적조 `cod_news#seq` | 사람이 읽는 설명이 아니다 |
 | `validated_scope` | 계산값의 **검증 범위** — `STATION_SITES`는 관측소 위치에서만 교차검증했다는 뜻. 계산값(`COMPUTED`)에만 채운다 | 만 안쪽 양식장의 추정이 검증됐다는 뜻이 아니다 — **만 안쪽은 미검증** |
 | `alertable` | **발송 자격** — 계산 시점의 정적 자격 | 지금 보내라는 뜻이 아니다. 신선도를 담지 않는다 — 발송 후보는 `axis_status`와 함께 본다(계획서 5.5절 W5) |
 | `bulletins.grade` · `bulletin_details.grade` · `farm_readings.grade` | 적조 공식 4단계 `NONE`(예비특보 미만) / `PRE_ADVISORY` / `ADVISORY` / `WARNING`, 그리고 `NOT_GRADED`(비대상 종) · `UNKNOWN`(원인생물·밀도·세부 행 없음) | 여기의 `NONE`은 `provenance`의 `NONE`(신뢰 기준 밖)과 **다르다**. `farm_readings.grade`는 `grading`이 고른 현재값 행의 등급이다 — 대시보드가 다시 고르지 않는다 |
 | `axis_status.state`·`reason` | 침묵 분류(4.9절 상태 값 17종)와 그 사유. 겹치면 4.9절 우선순위 | 화면 문구. `provenance`의 `NONE`과 다르다 — 값을 못 쓰는 경우는 `NOT_USABLE` |
+| `farm_areas.area_id` | 모듈이 정한 양식장 해역 — 반경 안 해역 중 중심이 가장 가까운 하나(`rule`). 커버리지 밖·계절 밖 판정에 쓴 해역이다(개정 15) | 행정구역·어업권 구역이 아니다. 적조 속보 대응은 반경 안 해역을 모두 쓴다 — 이 열 하나로 적조 해역을 다시 고르지 않는다 |
 | `observed_at_utc` · `computed_at_utc` · `basis_utc` · `last_checked_utc` | 관측 시각 · 산출 시각 · 판정에 쓴 가장 새 입력의 시각 · 판정 시각 | — |
 
 **축 키 이름** *(제안 — 11절)*: `water_temp`·`salinity`·`tide_level`·`wind_speed`·`air_temp`·`red_tide`·`dissolved_oxygen`·`chlorophyll`

@@ -69,22 +69,61 @@ def test_B6_placeholder(tmp_path):
         load_operational(path=p)
 
 
+def _valid_cfg_text() -> str:
+    """config/operational.initial.yaml과 같은 키 집합 — 스키마를 통과하는 최소 설정"""
+    return (Path(__file__).parents[2] / "config" / "operational.initial.yaml").read_text(encoding="utf-8")
+
+
+def test_B6_missing_key(tmp_path):
+    """필수 키 누락(stale_threshold_hours.air_temp) → 멈춤"""
+    import yaml
+    cfg = yaml.safe_load(_valid_cfg_text())
+    del cfg["stale_threshold_hours"]["air_temp"]
+    p = tmp_path / "operational.yaml"
+    p.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+    with pytest.raises(SystemExit, match="air_temp"):
+        load_operational(path=str(p))
+
+
+def test_B6_missing_typhoon_active(tmp_path):
+    """typhoon_active는 필수 키 — 누락 시 멈춤 (2.0.6절, 개정 13)"""
+    import yaml
+    cfg = yaml.safe_load(_valid_cfg_text())
+    del cfg["typhoon_active"]
+    p = tmp_path / "operational.yaml"
+    p.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+    with pytest.raises(SystemExit, match="typhoon_active"):
+        load_operational(path=str(p))
+
+
+def test_B6_unknown_key(tmp_path):
+    """모르는 키(오타) → 멈춤"""
+    import yaml
+    cfg = yaml.safe_load(_valid_cfg_text())
+    cfg["stale_threshold_hours"]["water_tmp"] = 3
+    p = tmp_path / "operational.yaml"
+    p.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+    with pytest.raises(SystemExit, match="water_tmp"):
+        load_operational(path=str(p))
+
+
+def test_B6_chlorophyll_rejected(tmp_path):
+    """chlorophyll은 판정 정의 — 운영 조정에 오면 멈춤 (2.0.6절)"""
+    import yaml
+    cfg = yaml.safe_load(_valid_cfg_text())
+    cfg["stale_threshold_hours"]["chlorophyll"] = 24
+    p = tmp_path / "operational.yaml"
+    p.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        load_operational(path=str(p))
+
+
 def test_B8_success_and_hash(tmp_path):
     """B8: 기동 성공 → 설정 해시 반환"""
     from common.config._operational import operational_hash
-    p = _write_cfg(tmp_path, """
-        schema: operational-v1
-        tide:
-          flatline_minutes: 30
-        stale_threshold_hours:
-          water_temp: 3
-        evaluation:
-          interpolation_stale_minutes: 60
-          grading_stale_minutes: 30
-        water_temp: 3
-        red_tide_bulletin: 72
-    """)
-    cfg = load_operational(path=p)
+    p = tmp_path / "operational.yaml"
+    p.write_text(_valid_cfg_text(), encoding="utf-8")
+    cfg = load_operational(path=str(p))
     assert cfg["schema"] == "operational-v1"
     h = operational_hash(cfg)
     assert isinstance(h, str) and len(h) == 16

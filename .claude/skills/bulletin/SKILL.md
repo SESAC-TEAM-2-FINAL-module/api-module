@@ -1,6 +1,6 @@
 ---
 name: bulletin
-description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_module/collector/adapters/bulletin/ 와 processor/adapters/bulletin/ 를 만들거나 고칠 때 쓴다 (지시서 I-3). outer·item2 두 층 보관(item2 없는 속보 포함), 적조 등급 판정 순서(UNKNOWN·NOT_GRADED·공식 4단계), txt_seas 정규화·지점 분리(bulletin_detail_areas)와 검토 큐(unmapped_locations), 분할 수집, 시드 파일 형식과 적재 코드. 양식장별 적조 현재값 선택·alertable(grading), 계절 밖 판정(evaluation) 작업에는 쓰지 않는다."
+description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_module/collector/adapters/bulletin/ 와 processor/adapters/bulletin/ 를 만들거나 고칠 때 쓴다 (지시서 I-3). outer·item2 두 층 보관(item2 없는 속보 포함), 적조 등급 판정 순서(UNKNOWN·NOT_GRADED·공식 4단계), txt_seas 정규화·지점 분리(bulletin_detail_areas)와 검토 큐(unmapped_locations), 30일 수집 창, 시드 파일 형식과 적재 코드. 양식장별 적조 현재값 선택·alertable(grading), 계절 밖 판정(evaluation) 작업에는 쓰지 않는다."
 ---
 
 # bulletin
@@ -13,13 +13,13 @@ description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_mod
 
 | 경로 | 이 skill이 만드는 것 |
 | --- | --- |
-| `collector/adapters/bulletin/` | 최근 14일 창 호출, 원문 저장 요청. `collector-bulletin` 명령에 **등록**. `collector-completeness`용 **분할 수집**(같은 창을 월 분할) |
+| `collector/adapters/bulletin/` | **최근 30일 창** 호출, 원문 저장 요청. `collector-bulletin` 명령에 **등록**. 분할 수집은 없다 — 적조는 개정 18에서 분할 합산 제외 |
 | `processor/adapters/bulletin/` | outer·`item2` 해석 → `bulletins`·`bulletin_details`·`bulletin_detail_areas` 행, **등급 판정**, `txt_seas` 정규화·지점 분리, 검토 큐(`unmapped_locations`) 적재. `processor/main.py`에 **등록** |
-| 시드 | `area_aliases`·`areas`·`axis_coverage`의 **파일 형식과 적재 코드** — 내용은 미결(⑧) |
+| 시드 | `area_aliases`·`areas`·`axis_coverage`의 **파일 형식과 적재 코드**. 내용은 **2026-10-01 확정**(⑧, 계획서 11절) |
 
 **만들지 않는 것**
 
-- 호출층·응답 해석·원문 저장·분할 합산 **비교** → `common-core`
+- 호출층·응답 해석·원문 저장·**직전 원문 대조**(적조 절단 감시, 3.3절 개정 18) → `common-core`
 - 양식장별 적조 현재값 선택(유효 기간·등급 순서), `farm_readings` 적조 행, `alertable` → `grading`
 - 계절 밖·커버리지 밖 판정, 적조 신선도(마지막 성공 호출 기준) → `evaluation`
 - 화면 문구("속보 발생", "해역 미상 속보")와 발송 시점 → 대시보드(5.5절 W5·W6)
@@ -28,7 +28,7 @@ description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_mod
 
 ## ② 원천 절 (계획서)
 
-1.1(`redtideList` 행) · 1.3 · 2.1(`collector-bulletin`·`collector-completeness`) · 3.3(분할 합산) · 4.2 · 4.3 · 5.3(`bulletins`·`bulletin_details`·`bulletin_detail_areas`·`unmapped_locations`·`area_aliases`·`areas`·`axis_coverage`) · 6.3(bulletin 행) · 8절
+1.1(`redtideList` 행) · 1.3 · 2.1(`collector-bulletin`) · 3.3(적조 직전 원문 대조) · 4.2 · 4.3 · 5.3(`bulletins`·`bulletin_details`·`bulletin_detail_areas`·`unmapped_locations`·`area_aliases`·`areas`·`axis_coverage`) · 6.3(bulletin 행) · 8절
 
 ---
 
@@ -55,8 +55,9 @@ description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_mod
 
 ### ③-2 수집 (2.1·3.3·8절)
 
-- 워크로드 `collector-bulletin` — CronJob 1시간, 적조 시즌 외 6시간(워크로드 설정). **최근 14일 창**. 호출 예산은 하루 24회
-- **페이징이 없다** — `pageNo`는 무시되고 `header`에 `totalCount`가 없다. 그래서 완전성은 **분할 합산**으로 본다: `collector-completeness`(주 1회)가 같은 창을 월 분할로 받아 `tag = completeness` 원문을 남기고, 합산 비교는 `common-core`의 `processor/completeness/`가 한다. **비교 범위를 먼저 맞춘다**(N12)
+- 워크로드 `collector-bulletin` — CronJob 1시간, 적조 시즌 외 6시간(워크로드 설정). **최근 30일 창**(KST 오늘 포함, 개정 18). 호출 예산은 하루 24회
+- **날짜 필터는 `day_report`(조사일시) 기준**이다(1.3절, I-13). 등록일(`cod_news`, 속보코드)로 거르는 변수는 없다 — 명세 밖 `cod_news`는 무시된다. 그래서 등록 지연(관측 최대 14일)이 창 길이를 넘는 속보는 받지 못한다 → 30일 창
+- **페이징이 없다** — `pageNo`는 무시되고 `header`에 `totalCount`가 없다. 그래서 완전성은 **직전 원문 대조**로 본다(3.3절, 개정 18): processor가 정기 원문을 처리할 때 직전 정기 원문에 있던 속보(`day_report`가 이번 창 안)가 빠졌으면 운영 이벤트 `BULLETIN_WINDOW_MISSING`. 비교는 `common-core`의 `processor/completeness/`. 분할 합산(`collector-completeness`)은 적조를 받지 않는다 — 30일 창도 월 분할 1~2개라 같은 요청 두 번의 대조에 가깝다
 - 적조 시즌은 **시드 `axis_coverage.season_months`**에만 있다 — 계절 밖 판정(`evaluation`)의 유일한 원천이다. 설정 키는 없다. 수집 주기 전환(시즌 1시간 / 비시즌 6시간)은 워크로드 설정이며, `HANDOFF.md` 권장 스케줄을 시드의 계절과 **같은 달로** 맞춘다
 
 ### ③-3 저장 — 두 층과 지점 (4.2·4.3·5.3절)
@@ -105,6 +106,8 @@ description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_mod
 - **원문(`txt_seas_raw`)과 정규화본을 둘 다 저장.** 정규화 키로 비교하고 원문은 표시·감사용
 - **정규화 키의 저장 위치**: 1~3단계를 거친 문자열(분리 전)은 `bulletin_details.txt_seas_key`에, 4~5단계로 **나뉜 지점마다 1행**을 `bulletin_detail_areas`에 둔다. "및"은 나뉜 수만큼, "~" 구간은 양 끝 두 지점이다. 해역 대응(4.8절)은 `bulletin_detail_areas`의 모든 행을 쓴다 — 첫 지점만 쓰지 않는다
 - 매핑되지 않은 문자열은 **검토 큐**(`unmapped_locations`, 5.3절)로 (v1.5 5.4절). 두 종류로 나눈다 — `PARSE_FAILED`(미등록 문구: 별칭 등록 대상) / `OUT_OF_SCOPE`(해석했으나 관심 구역 밖, 예: 서해: 통계로만). 같은 정규화 키가 다시 나오면 행을 늘리지 않고 횟수·마지막 시각만 갱신한다. 별칭을 등록해 해소되면 `resolved_at_utc`를 채운다
+- **`unmapped_locations` 적재 시점**: `normalize()` 중 발견한 미매핑 문자열은 I-6(DB 접근 계층) 이전에는 stderr 로깅으로 남기고, I-6 이후 DB 적재로 전환한다 *(제안)*(4.3절)
+- **`area_aliases` 시드 예시**: 산양읍 내만 지명(`산양읍 장군봉 내만`·`산양읍 풍화리 월명도 북측`)은 `gyeongnam_tongyeong`으로 매핑한다 — NIFS 해역도 시각 확인(2026-09-30)
 
 - 정규화는 **이 skill의 순수 함수**로 둔다. 비교는 정규화 키로 하고 DB 콜레이션에 맡기지 않는다(`CLAUDE.md` 3절)
 - `txt_seas`는 **`item2` 안에 있다.** outer에서 찾으면 빈 값이 나온다 — 그래서 `item2` 없는 속보는 해역이 없다
@@ -160,7 +163,7 @@ description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_mod
 
 - 원문은 A 재검증의 `redtideList` R1·R3 창(`$SRC_API/output/raw/redtideList_r1_*`·`_r3_*`)이다(A.7절)
 - 게이트 기대값(7.7절 `counts`): `redtide_r1: {outer: 51, details: 50, stored_bulletins: 51, cochlodinium: 45, item2_missing_unknown: 1}`, `redtide_r3: {outer: 15, not_graded: 10, detail_area_parts: 20}`, `redtide_all: {unique_day_report: 66}`
-- 관련 검사(다른 skill 소유): N12·N13(분할 합산) — `common-core` / P5·P13(발송 자격·적조 현재값) — `grading` / P15(적조 신선도) — `evaluation`
+- 관련 검사(다른 skill 소유): N15·N16(직전 원문 대조) — `common-core` / P5·P13(발송 자격·적조 현재값) — `grading` / P15(적조 신선도) — `evaluation`
 
 ---
 
@@ -169,7 +172,7 @@ description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_mod
 | 사실 | 주인 |
 | --- | --- |
 | 상태 이름표, `grade` 필드 의미, `_utc` 규칙 | `CLAUDE.md` 6절 |
-| 호출층, 응답 해석, 원문 저장·키 마스킹, 분할 합산 비교 | `common-core` |
+| 호출층, 응답 해석, 원문 저장·키 마스킹, 직전 원문 대조 | `common-core` |
 | 적조 현재값(유효 기간 `bulletin.current_window_days`·등급 순서), 해역 → 양식장 대응, `alertable` | `grading` |
 | 계절 밖·커버리지 밖 판정, 적조 신선도 | `evaluation` |
 
@@ -183,4 +186,8 @@ description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_mod
 
 | 항목 | 계획서의 상태 |
 | --- | --- |
-| **시드 내용** | `areas`의 해역 목록·중심·반경, `axis_coverage`의 선언(**적조 계절 포함**), `area_aliases`의 초기 별칭 — 11절 미결, S12 선행 조건. 정하는 순서: 별칭 → 해역 목록 → 커버리지 선언 → 계절 |
+| **시드 내용** | **확정 2026-10-01**(계획서 개정 11, 11절) — `seeds/areas.yaml` 8개 해역 · `area_aliases.yaml` 15개 별칭 · `axis_coverage.yaml` 8개 해역 `red_tide` 선언(계절 `season_months: [5, 6, 7, 8, 9, 10]`). 출처: R1·R3 픽스처 + NIFS 해역도 확인. 이 skill은 내용을 바꾸지 않는다 — 바꾸려면 계획서 개정 |
+
+### 분할 합산 — 적조 제외 (3.3절, 개정 18)
+
+- 개정 17의 적조 분할 수집(`redtideList-completeness`)은 **개정 18에서 뺐다**. 14일 창은 대개 월 분할 1개라 비교가 같은 요청 두 번의 대조였다. 절단 감시는 직전 원문 대조(③-2)가 맡는다

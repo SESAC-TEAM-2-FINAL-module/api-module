@@ -15,6 +15,7 @@ class CompletenessResult:
     expected: int | None
     actual: int
     message: str = ""
+    truncated_side: str | None = None  # 분할 합산 INCOMPLETE — SINGLE / SPLIT (개정 17)
 
 
 def check_completeness(
@@ -65,34 +66,53 @@ def check_split_completeness(
     split_windows: list[tuple[str, str, int]],
 ) -> CompletenessResult:
     """
-    분할 합산 비교.
-    반드시 비교 범위를 먼저 맞춘다 — 범위 불일치 시 COMPARISON_RANGE_MISMATCH (절단·INCOMPLETE 금지).
-    범위 일치 후 분할 합 < 단일 창이면 INCOMPLETE.
+    분할 합산 비교 (3.3절, 개정 17). 날짜는 YYYYMMDD 문자열.
+    1) 범위 — 월 분할 창들이 단일 창을 **빈틈·겹침 없이** 덮지 않으면 COMPARISON_RANGE_MISMATCH
+       (절단·INCOMPLETE로 판정하지 않는다, N12)
+    2) 건수 — 같으면 OK. 다르면 INCOMPLETE이고 작은 쪽을 truncated_side로:
+       분할 합 > 단일 창 → SINGLE(단일 창 쪽 절단 의심 — 정기 수집 경로), 분할 합 < 단일 창 → SPLIT (N13)
     """
     single_start, single_end, single_count = single_window
-    if not split_windows:
-        return CompletenessResult(status="OK", expected=None, actual=single_count)
+    parts = sorted(split_windows, key=lambda w: w[0])
+    if not parts:
+        return CompletenessResult(status="COMPARISON_RANGE_MISMATCH", expected=single_count, actual=0,
+                                  message="월 분할 없음 — 비교 범위를 맞출 수 없다")
 
-    split_start = min(w[0] for w in split_windows)
-    split_end = max(w[1] for w in split_windows)
-
-    if split_start != single_start or split_end != single_end:
+    gap = _range_gap(single_start, single_end, [(w[0], w[1]) for w in parts])
+    if gap:
         return CompletenessResult(
-            status="COMPARISON_RANGE_MISMATCH",
-            expected=None,
-            actual=single_count,
-            message=(
-                f"단일창={single_start}~{single_end} 분할={split_start}~{split_end} — "
-                "범위 불일치, 절단·INCOMPLETE로 판정하지 않는다"
-            ),
+            status="COMPARISON_RANGE_MISMATCH", expected=None, actual=single_count,
+            message=f"단일창={single_start}~{single_end} 분할={parts[0][0]}~{parts[-1][1]} — {gap}. "
+                    "범위 불일치, 절단·INCOMPLETE로 판정하지 않는다",
         )
 
-    split_total = sum(w[2] for w in split_windows)
-    if split_total < single_count:
-        return CompletenessResult(
-            status="INCOMPLETE",
-            expected=single_count,
-            actual=split_total,
-            message=f"분할합={split_total} < 단일창={single_count}",
-        )
-    return CompletenessResult(status="OK", expected=single_count, actual=split_total)
+    split_total = sum(w[2] for w in parts)
+    if split_total == single_count:
+        return CompletenessResult(status="OK", expected=single_count, actual=split_total)
+    side = "SINGLE" if split_total > single_count else "SPLIT"
+    return CompletenessResult(
+        status="INCOMPLETE", expected=single_count, actual=split_total, truncated_side=side,
+        message=f"분할합={split_total} 단일창={single_count} — {'단일 창' if side == 'SINGLE' else '분할'} 쪽 절단 의심",
+    )
+
+
+def _range_gap(start: str, end: str, windows: list[tuple[str, str]]) -> str:
+    """windows가 [start, end]를 빈틈·겹침 없이 덮으면 빈 문자열, 아니면 사유"""
+    from datetime import date, timedelta
+
+    def d(x: str) -> date:
+        return date(int(x[:4]), int(x[4:6]), int(x[6:8]))
+
+    if windows[0][0] != start:
+        return f"시작이 다름({windows[0][0]})"
+    if windows[-1][1] != end:
+        return f"끝이 다름({windows[-1][1]})"
+    for (s0, e0), (s1, _e1) in zip(windows, windows[1:]):
+        if d(s1) > d(e0) + timedelta(days=1):
+            return f"빈틈 {e0}~{s1}"
+        if d(s1) <= d(e0):
+            return f"겹침 {s1}~{e0}"
+    for s0, e0 in windows:
+        if d(e0) < d(s0):
+            return f"거꾸로 된 창 {s0}~{e0}"
+    return ""

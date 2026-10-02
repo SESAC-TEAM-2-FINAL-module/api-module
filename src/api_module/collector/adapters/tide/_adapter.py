@@ -71,7 +71,8 @@ def _collect_station(url: str, station_code: str, key: str) -> dict | None:
             first_result = result
 
         if result.get("error"):
-            return None
+            # 연결 실패·타임아웃도 원문(error 기록)으로 남긴다 — 판정은 processor (2.3절)
+            return result
 
         # 사전 읽기: totalCount와 items 추출 (판정하지 않는다)
         body_text = result.get("body") or ""

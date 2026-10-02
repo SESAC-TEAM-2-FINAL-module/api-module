@@ -1,22 +1,24 @@
 # config/operational.initial.yaml — 운영 조정 초기값
 # ConfigMap의 원본 · 이미지에 포함하지 않음
 # 계획서 2.0.6절 · 7.7절 · 4.9절
-# <미결> 값은 인계(S12) 전까지 결정 필요 — 스키마 검사에서 <미결> 거부
+# 모든 값 결정 완료 (2026-09-30). S12 진입 가능.
 
 schema: operational-v1
 
+typhoon_active: false          # 태풍 특보 중 R4 급변 면제 — 운영자 수동 토글 (2026-09-30)
+
 tide:
-  flatline_minutes: <미결>   # 값 멈춤 감지 N분 (계획서 A2)
+  flatline_minutes: 30          # C2 관측 간격 5분 → 6회 연속(30분) 멈춤 판단 (2026-09-30 채택)
 
 stale_threshold_hours:
   water_temp: 3
   red_tide_bulletin: 72
-  salinity_tide: <미결>         # dtRecent 염분 신선도 (계획서 A2)
-  tide_level: <미결>
-  wind_speed: <미결>
-  air_temp: <미결>
-  dissolved_oxygen: <미결>      # I-4 0m DO 집계 결과 보고 결정 (계획서 A2)
+  salinity_tide: 3              # dtRecent 염분 신선도 (2026-09-30 채택)
+  tide_level: 3                 # C2 소스 동일 — water_temp 3h와 일관 (2026-09-30 채택)
+  wind_speed: 3                 # 동일 (2026-09-30 채택)
+  air_temp: 3                   # 동일 (2026-09-30 채택)
+  dissolved_oxygen: 1224         # 픽스처 관측 간격 51일(=1224h) 임시값 — 다년도 집계 후 재결정 (계획서 A2)
 
 evaluation:
-  interpolation_stale_minutes: <미결>
-  grading_stale_minutes: <미결>
+  interpolation_stale_minutes: 60   # sweep 10분 주기, water_temp 3h의 1/3 (2026-09-30 채택)
+  grading_stale_minutes: 60         # 동일 근거 (2026-09-30 채택)

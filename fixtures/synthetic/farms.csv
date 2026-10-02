@@ -1,2 +1,2 @@
-farm_id,lat,lng,active
-syn_gam_001,34.68,127.69,true
+farm_id,lat,lng,active,area_id
+syn_gam_001,34.68,127.69,true,jeonnam_yeosu

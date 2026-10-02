@@ -67,6 +67,34 @@ def test_N13_incomplete_after_range_match():
     assert r.status == "INCOMPLETE"
     assert r.actual == 700
     assert r.expected == 1000
+    assert r.truncated_side == "SPLIT"
+
+
+def test_N13_split_exceeds_single_is_single_truncation():
+    """N13 ①(개정 17): 분할 합 > 단일 창 → INCOMPLETE·SINGLE — 정기 수집이 쓰는 단일 창 호출의 절단 의심"""
+    single = ("20250901", "20250930", 600)
+    splits = [("20250901", "20250915", 300), ("20250916", "20250930", 400)]
+    r = check_split_completeness(single, splits)
+    assert r.status == "INCOMPLETE" and r.truncated_side == "SINGLE"
+
+
+@pytest.mark.parametrize("splits,why", [
+    ([("20250901", "20250914", 300), ("20250916", "20250930", 400)], "빈틈"),
+    ([("20250901", "20250916", 300), ("20250916", "20250930", 400)], "겹침"),
+    ([("20250902", "20250915", 300), ("20250916", "20250930", 400)], "시작"),
+    ([("20250901", "20250915", 300), ("20250916", "20250929", 400)], "끝"),
+    ([], "없음"),
+])
+def test_N12_gap_or_overlap_is_range_mismatch(splits, why):
+    """분할 창이 단일 창을 빈틈·겹침 없이 덮지 않으면 COMPARISON_RANGE_MISMATCH (개정 17)"""
+    r = check_split_completeness(("20250901", "20250930", 700), splits)
+    assert r.status == "COMPARISON_RANGE_MISMATCH", why
+
+
+def test_split_order_does_not_matter():
+    single = ("20250901", "20250930", 700)
+    splits = [("20250916", "20250930", 400), ("20250901", "20250915", 300)]
+    assert check_split_completeness(single, splits).status == "OK"
 
 
 def test_split_ok():
