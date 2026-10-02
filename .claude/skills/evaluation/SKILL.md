@@ -18,7 +18,7 @@ description: "침묵 판정과 결과 테이블 계약 — src/api_module/evalua
 
 | 경로 | 이 skill이 만드는 것 |
 | --- | --- |
-| `evaluation/main.py` | 세 명령 — `evaluate`(큐 컨슈머), `sweep`(CronJob), `gate`(운영 조정 게이트, 2.0.6절) |
+| `evaluation/main.py` | 세 명령 — `evaluate`(큐 컨슈머), `sweep`(CronJob), `gate`(운영 조정 게이트, 2.0.6절). `evaluate`·`sweep`은 기동 시 `areas`·`axis_coverage`가 비어 있으면 멈춘다 — `gate`는 DB 없이 돌므로 제외(빈 해역 시드 검사 — 주인 `common-core`, 개정 19) |
 | `evaluation/` | 침묵 판정, `axis_status` 쓰기 규칙, 신선도 임계 적용, `result.updated` 발행 |
 | `contracts/tables/` 결과 테이블 **의미 계약** | 5.5절(필드 의미 + W1~W8)을 같은 내용으로 배포한다. DDL 생성본은 `repository` 몫 |
 | `fixtures/synthetic/` 게이트 픽스처 | 7.3b·P3·P6·P10·P15의 합성 입력 — 임계에 **상대적인** 시각으로 짠다. 이 이미지에 포함된다 |
@@ -125,6 +125,8 @@ description: "침묵 판정과 결과 테이블 계약 — src/api_module/evalua
 | **산출 지연** (`grading`) | `evaluation.grading_stale_minutes` | 운영 조정 | 60 (분) | 이 문서 신설. 초기값 채택 2026-09-30 — 추정 지연과 같은 근거 |
 
 - 출력: `axis_status`(5.3절) → `result.updated`
+
+- **축 `red_tide_risk`(적조 위험도 지수, 4.9·4.10절 — 개정 20)**: 상태는 `NOT_USABLE`(`reason` = `none_reason` — `INSUFFICIENT_FACTORS`·`RULE_UNDECIDED`)·`GRADING_STALE`(4.9절 산출 지연 기준 그대로 — 정기 경로 적재 뒤 이 축 행 미갱신)·`NORMAL`만 쓴다. **수집 원천 대응이 없다** — `AXIS_ADAPTER`에 넣지 않고 커버리지·계절·3번 묶음·신선도를 판정하지 않는다. sweep은 이 축에서 산출 지연만 본다. 입력 축 상태 중 가장 나쁜 것을 옮기지 않는다. 새 상태 값은 없다. 지수 계산은 `grading`이 주인
 
 ### ③-2 알림 (2.2절)
 
@@ -271,6 +273,7 @@ v1.5 4.5절 표의 각 행 + v1.4 추가 3종마다 입력과 기대 상태를 �
 - 관련 검사(다른 skill 소유): N8(게시 감시 실패) — `fishery` / Q6(`adapter_health` 갱신) — `common-core` / B6·B8(기동 시 검사) — `common-core`
 
 ---
+- **K1 축 상태 부분 (7.5절, 개정 20)**: 품질 하한 직전 → 축 `red_tide_risk` `NOT_USABLE`·`INSUFFICIENT_FACTORS`, 직후 → `NORMAL`. 결과 테이블 계약 `tables-v3`(새 표 `risk_index_factors`·`risk_index_levels`)은 이 skill이 `dashboard_contract.md`로 배포한다
 
 ## ⑦ 주인이 아닌 사실 — 참조만
 

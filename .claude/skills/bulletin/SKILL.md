@@ -1,6 +1,6 @@
 ---
 name: bulletin
-description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_module/collector/adapters/bulletin/ 와 processor/adapters/bulletin/ 를 만들거나 고칠 때 쓴다 (지시서 I-3). outer·item2 두 층 보관(item2 없는 속보 포함), 적조 등급 판정 순서(UNKNOWN·NOT_GRADED·공식 4단계), txt_seas 정규화·지점 분리(bulletin_detail_areas)와 검토 큐(unmapped_locations), 30일 수집 창, 시드 파일 형식과 적재 코드. 양식장별 적조 현재값 선택·alertable(grading), 계절 밖 판정(evaluation) 작업에는 쓰지 않는다."
+description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_module/collector/adapters/bulletin/ 와 processor/adapters/bulletin/ 를 만들거나 고칠 때 쓴다 (지시서 I-3). outer·item2 두 층 보관(item2 없는 속보 포함), 적조 등급 판정 순서(UNKNOWN·NOT_GRADED·공식 4단계), txt_seas 정규화·지점 분리(bulletin_detail_areas)와 검토 큐(unmapped_locations), 30일 수집 창, 시드 파일 형식·내용·변경 조항과 로컬·테스트용 적재 코드(운영 적용은 DB 소유 측). 양식장별 적조 현재값 선택·alertable(grading), 계절 밖 판정(evaluation) 작업에는 쓰지 않는다."
 ---
 
 # bulletin
@@ -15,7 +15,7 @@ description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_mod
 | --- | --- |
 | `collector/adapters/bulletin/` | **최근 30일 창** 호출, 원문 저장 요청. `collector-bulletin` 명령에 **등록**. 분할 수집은 없다 — 적조는 개정 18에서 분할 합산 제외 |
 | `processor/adapters/bulletin/` | outer·`item2` 해석 → `bulletins`·`bulletin_details`·`bulletin_detail_areas` 행, **등급 판정**, `txt_seas` 정규화·지점 분리, 검토 큐(`unmapped_locations`) 적재. `processor/main.py`에 **등록** |
-| 시드 | `area_aliases`·`areas`·`axis_coverage`의 **파일 형식과 적재 코드**. 내용은 **2026-10-01 확정**(⑧, 계획서 11절) |
+| 시드 | `area_aliases`·`areas`·`axis_coverage`의 **파일 형식·내용·변경 조항**과 로컬·테스트용 적재 코드. 내용은 **2026-10-01 확정**(⑧, 계획서 11절). 운영 DB 적용은 **DB 소유 측**(③-6, 계획서 4.3절 개정 19) |
 
 **만들지 않는 것**
 
@@ -69,8 +69,8 @@ description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_mod
 | `bulletin_detail_areas` | `cod_news`, `seq`, `part_no`, `area_key`, `area_id`(nullable) | 4.3절 4~5단계로 나뉜 **지점마다 1행**. PK (`cod_news`, `seq`, `part_no`). `area_id`는 별칭으로 해역이 정해진 경우만 — 비면 `unmapped_locations`에도 있다 |
 | `unmapped_locations` | `area_key`(PK), `kind`, `raw_sample`, `occurrence_count`, `first_seen_utc`, `last_seen_utc`, `resolved_at_utc`(nullable) | 검토 큐(4.3절). `kind`는 `PARSE_FAILED`/`OUT_OF_SCOPE` — 코드 상수로 검사 |
 | `area_aliases` | `alias_key`, `area_id`, `source` | 정규화 별칭 테이블. PK `alias_key` — 별칭 하나는 해역 하나로 간다. 광역 해역은 `areas`에 그 자체로 한 행 |
-| `areas` | `area_id`, `name`, `center_lat`, `center_lng`, `radius_km` | 적조 해역 → 양식장 대응 기준 (시드). PK `area_id` |
-| `axis_coverage` | `area_id`, `axis`, `covered`, `season_months`, `reason` | 커버리지 밖·계절 밖 **선언** (시드). v1.5 13절 `zone_axis_coverage` 대응. 4.9절. PK (`area_id`, `axis`). **`season_months`가 계절 밖 판정의 유일한 원천**이다 |
+| `areas` | `area_id`, `name`, `center_lat`, `center_lng`, `radius_km` | 적조 해역 → 양식장 대응 기준 (시드 — 운영 적용은 DB 소유 측 — 계획서 4.3절, 개정 19). PK `area_id` |
+| `axis_coverage` | `area_id`, `axis`, `covered`, `season_months`, `reason` | 커버리지 밖·계절 밖 **선언** (시드 — 운영 적용은 DB 소유 측 — 계획서 4.3절, 개정 19). v1.5 13절 `zone_axis_coverage` 대응. 4.9절. PK (`area_id`, `axis`). **`season_months`가 계절 밖 판정의 유일한 원천**이다 |
 
 - **outer 1속보 = `bulletins` 1행**이다. `item2`가 없어도 행을 만든다(20250924-001). `item2` 행마다 `bulletin_details` 1행, 그 `txt_seas`가 나뉜 **지점마다 `bulletin_detail_areas` 1행**
 - 날짜는 **`day_report`와 `cod_news` 앞 8자리를 둘 다** 저장한다. 명세의 `rdate`는 실응답에 없다
@@ -114,8 +114,11 @@ description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_mod
 
 ### ③-6 시드 (5.3절, A.6)
 
-- `area_aliases`(정규화 별칭), `areas`(해역 중심·반경 — 적조 해역 → 양식장 대응 기준), `axis_coverage`(해역 × 축의 커버리지·계절 **선언** — 적조 계절 포함)의 **파일 형식과 적재 코드**를 만든다
-- **내용은 미결이다**(11절) — 해역 목록·중심·반경, 선언, 초기 별칭을 추정해 채우지 않는다. 합성 검사(P13 등)는 합성 시드를 쓴다. 실데이터 대응은 S12 전에 내용이 확정돼야 돈다
+- `area_aliases`(정규화 별칭), `areas`(해역 중심·반경 — 적조 해역 → 양식장 대응 기준), `axis_coverage`(해역 × 축의 커버리지·계절 **선언** — 적조 계절 포함)의 **파일 형식과 적재 코드**를 만든다. 적재 코드(`load_seeds`)는 **로컬·테스트 전용**이다 — 운영 DB에 시드를 쓰지 않는다(계획서 12절)
+- 내용은 **2026-10-01 확정**(아래 ⑧). 합성 검사(P13 등)는 합성 시드를 쓴다
+- **운영 적재 (개정 19, 계획서 4.3절)**: 운영 DB 적용은 **DB 소유 측**이 적용 SQL 생성본(`contracts/tables/seeds_pg.sql`·`seeds_my.sql` — 생성은 `repository`)으로 한다. 시드는 **모두의 협의 아래 시드 파일을 고치고 같은 파일을 나눠 가진다** — 어느 쪽도 혼자 바꾸지 않는다
+- **반영 순서**: 해역 추가·변경은 DB 적용 → processor 롤아웃, 해역 삭제는 processor 롤아웃(별칭에서 먼저 뺀다) → DB 적용. 이미 적재된 `bulletin_detail_areas.area_id`는 재처리하지 않는다 — 정기 수집(30일 창)이 다시 받아 키 (`cod_news`, `seq`, `part_no`)로 덮는다
+- 시드 읽기는 `common/`에 있다 — `load_seeds`·별칭 읽기(`_load_area_aliases`)·SQL 생성기가 같은 읽기를 쓴다. 빈 시드 기동 검사와 서비스 전 점검(`seed-check`)은 `common-core`가 주인이다
 
 ---
 
@@ -186,7 +189,7 @@ description: "적조정보(redtideList) 수집·가공 어댑터 — src/api_mod
 
 | 항목 | 계획서의 상태 |
 | --- | --- |
-| **시드 내용** | **확정 2026-10-01**(계획서 개정 11, 11절) — `seeds/areas.yaml` 8개 해역 · `area_aliases.yaml` 15개 별칭 · `axis_coverage.yaml` 8개 해역 `red_tide` 선언(계절 `season_months: [5, 6, 7, 8, 9, 10]`). 출처: R1·R3 픽스처 + NIFS 해역도 확인. 이 skill은 내용을 바꾸지 않는다 — 바꾸려면 계획서 개정 |
+| **시드 내용** | **확정 2026-10-01**(계획서 개정 11, 11절) — `seeds/areas.yaml` 8개 해역 · `area_aliases.yaml` 15개 별칭 · `axis_coverage.yaml` 8개 해역 `red_tide` 선언(계절 `season_months: [5, 6, 7, 8, 9, 10]`). 출처: R1·R3 픽스처 + NIFS 해역도 확인. 이 skill은 내용을 바꾸지 않는다 — 바꾸려면 계획서 개정과 모두의 협의(③-6) |
 
 ### 분할 합산 — 적조 제외 (3.3절, 개정 18)
 

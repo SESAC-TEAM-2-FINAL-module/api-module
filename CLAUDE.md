@@ -44,6 +44,7 @@
 - 문자열 비교를 DB 콜레이션에 맡기지 않는다 — 정규화 키로 한다
 - `0.000`·빈 값 레코드를 버리지 않는다 — 결측으로 저장한다
 - **마이그레이션을 만들거나 운영 DB 스키마를 바꾸지 않는다** — 테이블이 없으면 멈추고 보고한다
+- **운영 DB에 해역 시드를 쓰지 않는다** — 적용은 DB 소유 측, 이 모듈은 적용 SQL 생성본까지(4.3절)
 - **인계한 매니페스트를 이 저장소에서 고쳐 배포하지 않는다** — 변경은 인프라에 요청한다
 - CI는 **이미지 알림만** 보낸다 — manifest 레포의 파일을 커밋하거나 PR을 열지 않는다
 - **판정 정의** 값을 바꾸면서 **게이트 기준 문서를 같이 고치지 않는 커밋**을 올리지 않는다 (게이트가 막는다). 운영 조정·워크로드 값은 기준 문서에 적지 않는다
@@ -172,16 +173,18 @@
 | `derivation` | 값의 유래 — `COMPUTED`(계산) / `MEASURED`(인근 실측) / `OFFICIAL`(기관 발표) / `SURVEY`(조사값) | — |
 | `provenance` | 영역 판정 — 오차·방법 기준 등급. `NONE`은 **신뢰 기준 밖** | 배지. `NONE`이 "값 없음"을 뜻하지 않는다 |
 | `none_reason` | `grading`이 기록한 `NONE` 사유 | 화면 표시용 사유가 아니다 — 표시는 `axis_status.reason` |
-| `lower` · `upper` | 수온: `value` ∓ 오늘의 오차 P95 | 최솟값·최댓값이 아니다 |
+| `lower` · `upper` | 수온: `value` ∓ 오늘의 오차 P95 / 적조 위험도 지수(`red_tide_risk`): 입력의 불확실성(수온 오차 범위, 빠진 항목)이 만드는 지수 범위(4.10절) | 최솟값·최댓값이 아니다 |
 | `source_ref` | 근거 원천 행의 키 — 수온 `run_id` / 인근 실측 `station_id` / DO·클로로필 `station_id@observed_at_utc`(조사·관측 시각, UTC ISO — 개정 14) / 적조 `cod_news#seq` | 사람이 읽는 설명이 아니다 |
 | `validated_scope` | 계산값의 **검증 범위** — `STATION_SITES`는 관측소 위치에서만 교차검증했다는 뜻. 계산값(`COMPUTED`)에만 채운다 | 만 안쪽 양식장의 추정이 검증됐다는 뜻이 아니다 — **만 안쪽은 미검증** |
 | `alertable` | **발송 자격** — 계산 시점의 정적 자격 | 지금 보내라는 뜻이 아니다. 신선도를 담지 않는다 — 발송 후보는 `axis_status`와 함께 본다(계획서 5.5절 W5) |
 | `bulletins.grade` · `bulletin_details.grade` · `farm_readings.grade` | 적조 공식 4단계 `NONE`(예비특보 미만) / `PRE_ADVISORY` / `ADVISORY` / `WARNING`, 그리고 `NOT_GRADED`(비대상 종) · `UNKNOWN`(원인생물·밀도·세부 행 없음) | 여기의 `NONE`은 `provenance`의 `NONE`(신뢰 기준 밖)과 **다르다**. `farm_readings.grade`는 `grading`이 고른 현재값 행의 등급이다 — 대시보드가 다시 고르지 않는다 |
 | `axis_status.state`·`reason` | 침묵 분류(4.9절 상태 값 17종)와 그 사유. 겹치면 4.9절 우선순위 | 화면 문구. `provenance`의 `NONE`과 다르다 — 값을 못 쓰는 경우는 `NOT_USABLE` |
 | `farm_areas.area_id` | 모듈이 정한 양식장 해역 — 반경 안 해역 중 중심이 가장 가까운 하나(`rule`). 커버리지 밖·계절 밖 판정에 쓴 해역이다(개정 15) | 행정구역·어업권 구역이 아니다. 적조 속보 대응은 반경 안 해역을 모두 쓴다 — 이 열 하나로 적조 해역을 다시 고르지 않는다 |
+| `risk_index_factors.contribution` · `ok` · `excluded_reason` | 적조 위험도 지수 항목의 기여도(= 가중치 × 점수, 제외 항목 0 — 네 행의 합 = 지수 `value`), 합산 사용 여부, 제외 사유 코드(`NO_INPUT`·`INPUT_NONE`·`SENSOR_QUALITY`·`RULE_UNDECIDED`) (4.10절, 개정 20) | 화면 문구가 아니다 |
+| `risk_index_levels.level` · `level_at_lower` · `level_at_upper` · `level_straddle` | 지수 `value`·`lower`·`upper`의 단계 코드와 경계 걸침 — **모듈이 판정**한다(4.10절) | 적조 공식 등급(`grade`)이 아니다. 대시보드가 `value`를 잘라 단계를 다시 만들지 않는다 |
 | `observed_at_utc` · `computed_at_utc` · `basis_utc` · `last_checked_utc` | 관측 시각 · 산출 시각 · 판정에 쓴 가장 새 입력의 시각 · 판정 시각 | — |
 
-**축 키 이름** *(제안 — 11절)*: `water_temp`·`salinity`·`tide_level`·`wind_speed`·`air_temp`·`red_tide`·`dissolved_oxygen`·`chlorophyll`
+**축 키 이름** *(제안 — 11절)*: `water_temp`·`salinity`·`tide_level`·`wind_speed`·`air_temp`·`red_tide`·`dissolved_oxygen`·`chlorophyll`·`red_tide_risk`(개정 20 — 적조 위험도 지수, 파생 축)
 
 ---
 

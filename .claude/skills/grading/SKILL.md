@@ -1,6 +1,6 @@
 ---
 name: grading
-description: "출처 등급·발송 자격 — src/api_module/grading/(큐 컨슈머)을 만들거나 고칠 때 쓴다 (지시서 I-8). obs.loaded·interp.done을 받아 양식장 × 축마다 farm_readings 한 행을 채운다: 양식장 ↔ 원천 대응(최근접 관측소·정점, 적조 현재값), 표층 규칙 적용, derivation·provenance(영역 판정, NONE 포함)·none_reason·validated_scope·alertable(발송 자격), lower·upper, source_ref, grade.done 발행. 침묵 분류·신선도 판정(evaluation), 배지·문구·발송 시점(대시보드) 작업에는 쓰지 않는다."
+description: "출처 등급·발송 자격 — src/api_module/grading/(큐 컨슈머)을 만들거나 고칠 때 쓴다 (지시서 I-8). obs.loaded·interp.done을 받아 양식장 × 축마다 farm_readings 한 행을 채운다: 양식장 ↔ 원천 대응(최근접 관측소·정점, 적조 현재값), 표층 규칙 적용, derivation·provenance(영역 판정, NONE 포함)·none_reason·validated_scope·alertable(발송 자격), lower·upper, source_ref, grade.done 발행, 적조 위험도 지수(파생 축 red_tide_risk·risk_index_factors·risk_index_levels — 지시서 I-16). 침묵 분류·신선도 판정(evaluation), 배지·문구·발송 시점(대시보드) 작업에는 쓰지 않는다."
 ---
 
 # grading
@@ -17,7 +17,7 @@ description: "출처 등급·발송 자격 — src/api_module/grading/(큐 컨�
 
 | 경로 | 이 skill이 만드는 것 |
 | --- | --- |
-| `grading/main.py` | 큐 컨슈머 — `obs.loaded`(모든 축)와 `interp.done`(수온). **두 경로는 서로 기다리지 않는다** |
+| `grading/main.py` | 큐 컨슈머 — `obs.loaded`(모든 축)와 `interp.done`(수온). **두 경로는 서로 기다리지 않는다**. 기동 시 `areas`가 비어 있으면 멈춘다(빈 해역 시드 검사 — 주인 `common-core`, 개정 19) |
 | `grading/` | 양식장 ↔ 원천 대응, 표층 규칙 적용, 등급·자격 판정, `farm_readings`·`farm_reading_history` 적재, `grade.done` 발행 |
 
 **만들지 않는 것**
@@ -123,6 +123,73 @@ grading.excluded_zones:                  # 제외 구역 — 중심·반경 목�
 
 ---
 
+### ③-6 적조 위험도 지수 (4.10절 전문 — 개정 20, 지시서 I-16)
+
+v1.5 7.4절 설계 B(가중 합산 지수)를 이 모듈 범위에 넣는다(2026-10-02 팀 결정). **판정·값은 모듈, 표시는 대시보드** — 대시보드는 지수·단계를 다시 계산하지 않는다(5.5절). v1.5 7.5절에 따라 **정확도(적조 발생 예측력)는 평가하지 않는다** — 지수는 입력 축의 상태를 한 줄로 모은 것이다.
+
+**계산 위치와 시점** — `grading` 안의 **파생 축** `red_tide_risk`. 새 이미지·큐 주제는 없다. 입력 축 4개(`red_tide`·`water_temp`·`salinity`·`chlorophyll`) 중 하나의 `farm_readings` 행을 쓴 뒤 **같은 양식장의 지수를 다시 계산**한다. 수온(`interp.done`)과 속보(`obs.loaded`)는 서로 기다리지 않으므로 **늦게 온 쪽에서 다시 계산**한다 — 입력은 언제나 그 시점의 `farm_readings` 현재값이다. 입력 축 행·지수 행(세 표)·두 축의 `farm_reading_history`를 **한 트랜잭션**에 쓰고, 커밋 뒤 축 `red_tide_risk`의 `grade.done`을 따로 한 건 낸다(메시지 하나에 축 하나 — 2.2절. `axis`는 문자열이라 계약 `queue-v1` 그대로). `obs.loaded`와 `interp.done`이 동시에 처리되면 한쪽이 다른 쪽의 커밋 전 값을 읽을 수 있다 — 그 차이는 **다음 입력 갱신에서 수렴**한다(지수는 현재값만 둔다). `axis_status`(evaluation 산출)는 읽지 않는다 — 단계 순서가 거꾸로 된다.
+
+**항목** — 판정 정의 `risk_index.factors`(이름 고정 4개)
+
+| `factor` | 입력 축 | 점수 규칙 (판정 정의 — 값은 11절) | 점수 범위 |
+| --- | --- | --- | --- |
+| `nearby_bulletin` | `red_tide` (4.8절 적조 현재값 — 반경 안 해역 대응 그대로) | 입력 `grade`별 점수표 `grade_scores`(`WARNING`·`ADVISORY`·`PRE_ADVISORY`·`UNKNOWN`·`NONE`·`NOT_GRADED`). **유효 기간 안 속보 없음 = OK, 점수 0** | 점 하나(`score_lower = score_upper = score`) |
+| `water_temp_band` | `water_temp` (IDW) | 구간 목록 `bands`(`[min, max)` → 점수), 어느 구간에도 들지 않으면 0 | 입력 `lower`~`upper` 구간 위에서 점수의 최솟값·최댓값 |
+| `salinity_band` | `salinity` (`dtRecent` 최근접 실측 — 화면 염분과 같은 행) | 구간 목록 `bands`, 밖이면 **0** | 입력에 범위가 없으면 점 하나 |
+| `chlorophyll_level` | `chlorophyll` (어장환경 표층 조사값) | 비교 기준 대비 상승 규칙 `rule` — **구조 자체가 미결**(비교 대상·상승 기준·점수, 11절) | 점 하나 |
+
+- 염분 입력의 기준은 v1.5 7.4절 주석("② 정선관측 기준선", `survey`)과 다르다 — 대시보드가 같은 기준을 요청했고(화면 염분 = 지수 입력) 모듈 염분 축이 이미 최근접 실측이기 때문이다. 입력 성격은 `realtime`
+- 구간 경계: `min` 포함·`max` 미포함. 점수 범위는 구간 경계에서의 점수 변화를 반영한다(입력 범위가 구간 경계를 넘으면 두 구간 점수가 모두 후보)
+
+**OK 항목** — 다음을 모두 만족하면 그 항목을 합산에 쓴다(`ok = true`)
+
+1. 입력이 있다 — `water_temp_band`·`salinity_band`·`chlorophyll_level`은 입력 축 `farm_readings` 행에 `value`가 있다. **`nearby_bulletin`은 `value`(밀도)를 보지 않는다** — 입력 축 행에 `grade`가 있거나(`UNKNOWN`·`NOT_GRADED`처럼 밀도가 없는 행 포함), "유효 기간 안 속보 없음"(값·`grade` 없음, `provenance = OFFICIAL`, 4.8절)이면 OK. 적조 행 자체가 없으면 `NO_INPUT`
+2. 입력 축 `provenance ≠ NONE`
+3. 입력의 원천 관측 행 `flags`에 `SENSOR_QUALITY`가 없다 — 찾는 법: `chlorophyll_level`은 `survey_observations`(정점 = `source_ref`의 `station_id`, `observed_at_utc`, 층 표층, metric 클로로필), `salinity_band`는 `observations`(관측소 = `source_ref`, 입력 행 `observed_at_utc`, metric 염분). `water_temp_band`·`nearby_bulletin`은 **해당 없음(통과)** — 수온은 IDW 입력 단계에서 품질 플래그 관측이 이미 빠지고(4.7절), 속보 행에는 품질 플래그가 없다
+4. 그 항목의 점수 규칙이 `<미결>`이 아니다 *(제안)*
+
+OK가 아니면 **제외 항목** — `excluded_reason`: `NO_INPUT`(입력 행·값 없음) / `INPUT_NONE`(입력 `provenance = NONE`, 입력 `none_reason`을 `input_none_reason`에 옮김) / `SENSOR_QUALITY` / `RULE_UNDECIDED`(점수 규칙 미결 *(제안)*). 판정 순서는 이 나열 순서다.
+
+**합산**
+
+| 값 | 정의 |
+| --- | --- |
+| 기여도 `contribution` | `weight` × `score`. 제외 항목은 **0** |
+| 지수 `value` | 기여도의 합 — **네 행의 기여도 합 = `value`**(저장 값, 반올림하지 않는다) |
+| 지수 `lower` | Σ(OK 항목) `weight` × `score_lower` |
+| 지수 `upper` | Σ(OK 항목) `weight` × `score_upper` **+ Σ(제외 항목) `weight`** — 빠진 항목은 0~1 어디든 될 수 있다는 불확실성을 범위에 넣는다(2026-10-02 사용자 결정). 재정규화하지 않는다 |
+| `provenance` | OK 항목 수 ≥ `risk_index.quality_gate.min_factors_ok` → `INTERPOLATED`, 미만 → `NONE`(`none_reason = INSUFFICIENT_FACTORS`) |
+| `derivation` · `alertable` | `COMPUTED` · **항상 `false`**(불변식, 4.8절) |
+| `observed_at_utc` | OK 항목 입력의 `observed_at_utc` 중 **가장 이른 값**(값이 없는 항목은 빼고) *(제안)*. 모두 없으면 `NULL` |
+| `source_ref` · `validated_scope` · `grade` · `unit` · `distance_km` | 모두 `NULL` — 근거는 `risk_index_factors.source_ref`, 지수는 교차검증 대상이 아니고, `grade`는 적조 공식 등급 전용이다 |
+
+- `provenance = NONE`이어도 계산할 수 있었던 `value`·`lower`·`upper`·단계는 저장한다(4.8절 불변식)
+- **판정 정의가 `<미결>`일 때** *(제안)* — 계산할 수 있는 만큼 저장한다(4.8절 불변식)
+  - ① **가중치(`weight`) 중 하나라도 미결** → 합산 자체가 불가능하다. 지수 행은 `value`·`lower`·`upper` 없음, `provenance = NONE`, `none_reason = RULE_UNDECIDED`. `risk_index_factors`·`risk_index_levels`에는 쓰지 않고 그 양식장의 기존 행은 지운다(옛 규칙의 분해가 남지 않게)
+  - ② **항목 점수 규칙만 미결** → 그 항목만 `RULE_UNDECIDED`로 제외(OK 조건 4), 지수는 계산한다
+  - ③ **품질 하한(`min_factors_ok`) 미결** → `value`·`lower`·`upper`·분해는 저장하고 `provenance = NONE`, `none_reason = RULE_UNDECIDED`(하한이 없으면 신뢰 기준을 정할 수 없다)
+  - ④ **단계(`levels`) 미결** → `value`·분해는 저장, `risk_index_levels` 행만 쓰지 않는다(기존 행은 지운다). `provenance`는 ③에 따른다
+  - 적용 순서: ① → (②·③·④ 각각). `none_reason`이 둘 이상 해당하면 `INVALID_COORDS` > `RULE_UNDECIDED` > `INSUFFICIENT_FACTORS` 순으로 하나를 쓴다
+- **좌표 불량 양식장**(1.6절 — 양식장 좌표 검증 실패)이면 지수도 `provenance = NONE`, `none_reason = INVALID_COORDS`로 둔다(다른 축과 같은 사유) *(제안)*. 판정 근거는 양식장 좌표 검증 결과다 — 입력 축 행으로 판단하지 않는다(좌표 불량 양식장은 IDW가 건너뛰어 수온 행이 아예 없다). 가중치가 정해져 있으면 계산할 수 있었던 `value`·`lower`·`upper`·분해는 그대로 저장한다
+- **판정 정의 값의 전제** — 값이 정해지면 `grading` 기동 시 검사로 확인하고 어기면 멈춘다: 점수 ∈ [0, 1], Σ`weight` = 1, `levels`의 첫 `min` ≤ 0(모든 값에 단계가 있다). 그래서 `value`·`lower`·`upper` ∈ [0, 1]이다. 미결 값은 검사하지 않는다(채우지 않는다)
+
+**단계** — 판정 정의 `risk_index.levels`(오름차순 `{code, min}` 목록, 값·코드 이름 미결). 값 x의 단계 = `min ≤ x`인 것 중 `min`이 가장 큰 코드(경계값은 위 단계). `value`의 단계를 `level`에, `lower`·`upper`의 단계를 `level_at_lower`·`level_at_upper`에 둔다 *(제안 — 대시보드 확인 중. 대시보드가 요청한 것은 걸침 여부)*. `level_straddle = (level_at_lower ≠ level_at_upper)`. 웹이 `value`를 잘라 단계를 만들면 판정을 다시 하는 것이 되므로 모듈이 넣는다.
+
+**저장** (5.3절) — `farm_readings` 축 `red_tide_risk` 한 행(이력은 기존 `farm_reading_history`에 합산값만) + `risk_index_factors`(양식장 × 항목 4행, 현재값만) + `risk_index_levels`(양식장당 한 행, 현재값만). 세 표는 같은 트랜잭션에서 쓴다.
+
+**축 상태** (4.9절) — `axis_status`에 축 `red_tide_risk`: `provenance = NONE` → `NOT_USABLE`(`reason` = `none_reason`), 산출 지연 → `GRADING_STALE`(**4.9절 기준 그대로** — 정기 경로 적재 뒤 이 축의 `farm_readings`가 한계 안에 갱신되지 않음), 그 밖 → `NORMAL`. **이 축에는 수집 원천 대응이 없다** — 커버리지·계절·원천·호출 문제(3번 묶음)·신선도 판정을 적용하지 않고, sweep은 이 축에서 산출 지연만 본다. **입력 축 상태 중 가장 나쁜 것을 옮기지 않는다** — 항목 하나가 `STALE`이어도 지수는 계산된다(OK 판정이 본다). 새 신선도 임계·새 상태 값은 없다. 커버리지·계절 선언(`axis_coverage`)은 이 축에 두지 않는다.
+
+**설정** (2.0.6절) — `risk_index.*`는 전부 **판정 정의**(`config/definitions.yaml`, 게이트 기준 문서와 같은 커밋). 값이 정해지기 전에는 `<미결>`이고, 검사는 **시험용 판정 정의**(테스트 안에서만 주는 값)로 임계 상대로 짠다. v1.5 원안 값(가중치 0.40·0.30·0.15·0.15, 수온 구간 22/24/27, 염분 32~33 → 0.5, `min_factors_ok: 2`)은 채택 전이다(11절)
+
+| 키 | 내용 |
+| --- | --- |
+| `risk_index.factors.<factor>.weight` | 가중치 |
+| `risk_index.factors.nearby_bulletin.grade_scores` | 등급별 점수 |
+| `risk_index.factors.water_temp_band.bands` · `salinity_band.bands` | 구간 목록 |
+| `risk_index.factors.chlorophyll_level.rule` | 상승 규칙 — 구조 미결 |
+| `risk_index.quality_gate.min_factors_ok` | OK 항목 수 하한 |
+| `risk_index.levels` | 단계 경계·코드 |
+
 ## ④ 이식 출처 (6.3절)
 
 | 새 경로 | 검증 코드 위치 | 처리 |
@@ -169,6 +236,7 @@ grading.excluded_zones:                  # 제외 구역 — 중심·반경 목�
 | P8 | 섬진강하구 제외 구역 안 합성 양식장 | 수온 `provenance = NONE`, `none_reason = EXCLUDED_ZONE`, `axis_status.state = NOT_USABLE`이고 `value`는 저장됨, 인근 실측 축은 정상 산출 |
 
 ---
+- **K1~K9 (7.5절, 개정 20)** — 적조 위험도 지수: K1 품질 하한 직전·직후, K2 제외 사유 3종과 `upper` 상향, K3 수온 추정 정지 시 대체 없음, K4 갱신 순서 두 가지의 같은 결과, K5 기여도 합 = `value`·분해 4행·`alertable = false`, K6 단계 경계·걸침, K7 규칙 `<미결>` 네 경우 *(제안)*, K8 적조 입력 `UNKNOWN`·`NOT_GRADED`·속보 없음·행 없음, K9 판정 정의 전제 위반 기동 멈춤. 임계·경계는 시험용 판정 정의로 상대적으로 짠다
 
 ## ⑦ 주인이 아닌 사실 — 참조만
 

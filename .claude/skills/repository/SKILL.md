@@ -1,6 +1,6 @@
 ---
 name: repository
-description: "DB 접근 계층 — src/api_module/common/repository/(tables.py, base.py, sql.py, dialect.py)와 contracts/tables/의 PostgreSQL·MySQL DDL 생성본을 만들거나 고칠 때 쓴다 (지시서 I-6). DB 중립 테이블 모델(SQLAlchemy 2.0), 방언 분기는 dialect.py 한 곳, 금지·대체 목록과 타입 규칙(시각은 초 단위), 테이블 키(= upsert 멱등 키), DB 연결 양식(.env.example에서 하나를 고름), DB 검사(고른 DB 필수, 두 DB 비교 선택). 마이그레이션·운영 스키마 적용, 원천별 정규화 규칙 작업에는 쓰지 않는다."
+description: "DB 접근 계층 — src/api_module/common/repository/(tables.py, base.py, sql.py, dialect.py)와 contracts/tables/의 PostgreSQL·MySQL DDL 생성본·해역 시드 적용 SQL 생성본을 만들거나 고칠 때 쓴다 (지시서 I-6). DB 중립 테이블 모델(SQLAlchemy 2.0), 방언 분기는 dialect.py 한 곳, 금지·대체 목록과 타입 규칙(시각은 초 단위), 테이블 키(= upsert 멱등 키), DB 연결 양식(.env.example에서 하나를 고름), DB 검사(고른 DB 필수, 두 DB 비교 선택). 마이그레이션·운영 스키마 적용, 원천별 정규화 규칙 작업에는 쓰지 않는다."
 ---
 
 # repository
@@ -16,8 +16,8 @@ description: "DB 접근 계층 — src/api_module/common/repository/(tables.py, 
 | `common/repository/tables.py` | SQLAlchemy 2.0 테이블 모델 — **DDL 생성과 기동 시 검사의 기준** |
 | `common/repository/base.py` | 인터페이스 — `upsert_observations`, `insert_raw_index`, … 각 단계가 부르는 쓰기·읽기 |
 | `common/repository/sql.py` | SQLAlchemy Core 구현 — 방언 무관 부분 |
-| `common/repository/dialect.py` | **방언 분기는 여기만** — upsert, 대량 적재 |
-| `contracts/tables/` | PostgreSQL·MySQL **DDL 생성본 두 벌** |
+| `common/repository/dialect.py` | **방언 분기는 여기만** — upsert, 대량 적재, DDL 생성, **해역 시드 적용 SQL 생성**(개정 19) |
+| `contracts/tables/` | PostgreSQL·MySQL **DDL 생성본 두 벌**, **해역 시드 적용 SQL 생성본 두 벌**(`seeds_pg.sql`·`seeds_my.sql`, 개정 19) |
 | `.env.example`의 DB 연결 양식 | 두 DB 양식을 **주석으로** 둔다(③-4). `.env.example` 파일 자체는 I-0이 만들고, 이 skill은 DB 부분의 내용을 맞춘다 |
 | DB 검사 | 7.4절 (⑥). 고른 DB의 테스트 컨테이너 구성은 I-0 몫이다(10절 S1) |
 
@@ -25,7 +25,7 @@ description: "DB 접근 계층 — src/api_module/common/repository/(tables.py, 
 
 - **마이그레이션 코드, 운영 DB 스키마 적용** — DB 소유 측이 한다. 테이블이 없으면 기동이 멈추고 보고한다(`CLAUDE.md` 3절)
 - 기동 시 테이블 검사의 **실행 코드**(`common/contract_check/`) → `common-core`. 이 skill은 그 검사가 기준으로 삼는 `tables.py`를 만든다
-- 결과 테이블의 **의미 계약**(5.5절, `contracts/tables/`의 설명 문서) → `evaluation`. 이 skill은 같은 폴더의 **DDL 생성본**만 만든다
+- 결과 테이블의 **의미 계약**(5.5절, `contracts/tables/`의 설명 문서) → `evaluation`. 이 skill은 같은 폴더의 **DDL 생성본과 해역 시드 적용 SQL 생성본**만 만든다. 시드 파일 형식·내용은 `bulletin`, 시드 읽기·빈 시드 기동 검사·`seed-check`는 `common-core`
 - 원천별 정규화 규칙(어떤 행을 어떻게 만드는가) → 각 원천 skill. 이 skill은 받은 행을 저장한다
 - 양식장 좌표 테이블(`farm_sites`) — **웹 서비스 소유**라 DDL을 생성하지 않는다(1.6절)
 
@@ -92,13 +92,13 @@ description: "DB 접근 계층 — src/api_module/common/repository/(tables.py, 
 | `bulletin_details` | `cod_news`, `seq`, `nam_biology`, `species_class`, `txt_seas_raw`, `txt_seas_key`, `min/max_density`, `grade` | `grade`는 `NOT_GRADED`·`UNKNOWN` 포함. `species_class`는 `TARGET`/`NON_TARGET`/`MISSING`(4.2절). `txt_seas_key`는 분리 전 정규화 문자열(4.3절). PK (`cod_news`, `seq`) |
 | `bulletin_detail_areas` | `cod_news`, `seq`, `part_no`, `area_key`, `area_id`(nullable) | 4.3절 4~5단계로 나뉜 **지점마다 1행**. PK (`cod_news`, `seq`, `part_no`). `area_id`는 별칭으로 해역이 정해진 경우만 — 비면 `unmapped_locations`에도 있다 |
 | `unmapped_locations` | `area_key`(PK), `kind`, `raw_sample`, `occurrence_count`, `first_seen_utc`, `last_seen_utc`, `resolved_at_utc`(nullable) | 검토 큐(4.3절). `kind`는 `PARSE_FAILED`/`OUT_OF_SCOPE` — 코드 상수로 검사 |
-| `area_aliases` | `alias_key`, `area_id`, `source` | 정규화 별칭 테이블. PK `alias_key` — 별칭 하나는 해역 하나로 간다. 광역 해역은 `areas`에 그 자체로 한 행 |
+| `area_aliases` | `alias_key`, `area_id`, `source` | 정규화 별칭 테이블. PK `alias_key` — 별칭 하나는 해역 하나로 간다. 광역 해역은 `areas`에 그 자체로 한 행. 시드 — 운영 적용은 DB 소유 측 — 계획서 4.3절, 개정 19 |
 | `publication_checks` | 4.5절 | PK `raw_id` — 감시 호출 한 번 = 원문 하나 = 기록 하나 |
 | `adapter_health` | `adapter`, `last_success_utc`, `last_failure_utc`, `consecutive_failures`, `retry_recovered` | `processor`가 원문을 해석한 뒤 기록한다. 갱신 규칙은 4.9절. PK `adapter` = 수집 원천(결정 D2). `retry_recovered`는 **정수(복구 횟수)** — 7.8절 Q6 "1 증가", v1.5 12절 "별도 카운터"(결정 D4) |
 | `ops_events` | `id`, `event_type`, `api`, `detail(JSON)`, `occurred_at_utc` | `CAST_RULE_ASSUMPTION_BROKEN` 등. PK `id`(대리 키), **고유 키 없음** — 운영 이벤트 로그라 쌓이는 것이 정상이다. 중복 알림으로 같은 이벤트가 두 번 기록될 수 있고, 로그이므로 허용한다 |
 | `completeness_checks` | `run_key`, `api`, `window_start`, `window_end`, `parts`, `single_count`, `split_sum`, `truncated_side`, `status`, `reason`, `checked_at_utc` | 분할 합산 결과 — **운영 기록**(결과 테이블 계약 밖). PK (`run_key`, `api`). `status`·`reason`·`truncated_side`는 `VARCHAR`+`CHECK`. 기동 시 검사에서 **processor만** 요구한다(`OPTIONAL_TABLES`, `check_schema(include=…)`) (개정 17) |
-| `areas` | `area_id`, `name`, `center_lat`, `center_lng`, `radius_km` | 적조 해역 → 양식장 대응 기준 (시드). PK `area_id` |
-| `axis_coverage` | `area_id`, `axis`, `covered`, `season_months`, `reason` | 커버리지 밖·계절 밖 **선언** (시드). v1.5 13절 `zone_axis_coverage` 대응. 4.9절. PK (`area_id`, `axis`). **`season_months`가 계절 밖 판정의 유일한 원천**이다 |
+| `areas` | `area_id`, `name`, `center_lat`, `center_lng`, `radius_km` | 적조 해역 → 양식장 대응 기준 (시드 — 운영 적용은 DB 소유 측 — 계획서 4.3절, 개정 19). PK `area_id` |
+| `axis_coverage` | `area_id`, `axis`, `covered`, `season_months`, `reason` | 커버리지 밖·계절 밖 **선언** (시드 — 운영 적용은 DB 소유 측 — 계획서 4.3절, 개정 19). v1.5 13절 `zone_axis_coverage` 대응. 4.9절. PK (`area_id`, `axis`). **`season_months`가 계절 밖 판정의 유일한 원천**이다 |
 | `interpolation_runs` | `run_id`, `load_id`, `metric`, `method`, `power_p`, `n_neighbors`, `ref_time_utc`, `station_set_key`, `error_p95`, `error_window_days`, `computed_at_utc` | 4.7절. `station_set_key` = 사용 관측소 `station_id`를 **정렬해 `,`로 이은 값**(예: `tide:DT_0014,tide:DT_0016`). PK `run_id`, **고유 (`load_id`, `metric`)** — 적재 한 번·항목 하나에 IDW 한 번. 같은 `obs.loaded`가 두 번 와도 같은 행 |
 | `interpolation_weights` | `run_id`, `farm_id`, `station_id`, `distance_km`, `weight` | "근거 보기". PK (`run_id`, `farm_id`, `station_id`) |
 | `interpolation_error` | `station_set_key`, `metric`, `window_days`, `p95`, `mae`, `n_samples`, `computed_on` | 오늘의 오차 (집합별). `station_set_key`는 `interpolation_runs`와 같은 형식. PK (`station_set_key`, `metric`, `window_days`, `computed_on`) |
@@ -111,6 +111,10 @@ description: "DB 접근 계층 — src/api_module/common/repository/(tables.py, 
 | `farm_reading_history` | 위 + `ts_utc` | 곡선용 시계열. 보존 기간 미결(11절). PK (`farm_id`, `axis`, `ts_utc`) |
 | `axis_status` | `farm_id`, `axis`, `state`, `reason`, `basis_utc`, `last_checked_utc` | 4.9절 쓰기 규칙. PK (`farm_id`, `axis`). `state`는 4.9절 상태 값 17종 — `VARCHAR` + `CHECK` |
 | `farm_areas` | `farm_id`, `area_id`(nullable), `distance_km`, `rule`, `computed_at_utc` | **모듈이 정한 양식장 해역**(1.6절, 개정 15). PK `farm_id`. `area_id`가 비면 반경 안 해역 없음. `rule` = `NEAREST_CENTER_WITHIN_RADIUS`. `evaluation`이 판정할 때마다 쓴다 |
+| `risk_index_factors` | `farm_id`, `factor`, `input_axis`, `input_value`, `input_lower`, `input_upper`, `input_unit`, `input_grade`, `input_baseline`, `score`, `score_lower`, `score_upper`, `weight`, `contribution`, `ok`, `excluded_reason`, `input_none_reason`, `source_ref`, `observed_at_utc`, `computed_at_utc` | 적조 위험도 지수 항목 분해(계획서 4.10절, 개정 20). PK (`farm_id`, `factor`). `factor`(`nearby_bulletin`·`water_temp_band`·`salinity_band`·`chlorophyll_level`)·`excluded_reason`(`NO_INPUT`·`INPUT_NONE`·`SENSOR_QUALITY`·`RULE_UNDECIDED`)은 `VARCHAR`+`CHECK`. `weight`·`contribution`·`ok`·`input_axis`·`computed_at_utc` NOT NULL |
+| `risk_index_levels` | `farm_id`, `level`, `level_at_lower`, `level_at_upper`, `level_straddle`, `computed_at_utc` | 지수 단계(4.10절). PK `farm_id`. 전 열 NOT NULL. 단계 코드 `CHECK`는 코드 이름이 정해지면 붙인다 |
+
+- **축 목록 `AXIS_VALS` (개정 20)**: `red_tide_risk`를 더한다 — `farm_readings`·`farm_reading_history`·`axis_status`·`axis_coverage`의 `axis` `CHECK`. 열 변경 없음
 | `bulletins` · `bulletin_details` · `bulletin_detail_areas` | 위 표와 같음 | 적조 속보 원천. **해역 없는 속보**는 여기에만 있다(4.8절). 지점별 해역은 `bulletin_detail_areas` |
 | `interpolation_weights` · `interpolation_error` · `stations` | 위 표와 같음 | "근거 보기" — 사용 관측소·거리·가중치·오차 산출 기준 |
 
@@ -135,7 +139,7 @@ common/repository/
   tables.py      # SQLAlchemy 모델 — DDL 생성과 기동 시 검사의 기준
   base.py        # 인터페이스: upsert_observations, insert_raw_index, …
   sql.py         # SQLAlchemy Core 구현 — 방언 무관 부분
-  dialect.py     # 방언 분기는 여기만: upsert, 대량 적재
+  dialect.py     # 방언 분기는 여기만: upsert, 대량 적재, DDL·시드 SQL 생성
 ```
 
 - **방언 분기는 `dialect.py` 한 파일로 제한한다.** 다른 파일에서 `postgresql`/`mysql` 문자열이 나오면 리뷰에서 반려
@@ -198,6 +202,7 @@ DB가 확정되지 않았다. 설계는 두 DB에 중립(5절)이고 **DDL 생�
 - DB에 쓰는 검사 전체(7.1의 F1~F10, 7.3, 7.5)
 - 고른 DB용 **DDL 생성본이 오류 없이 적용**되고, 적용 결과가 모델로 만든 스키마와 같다
 - 기동 시 검사: 테이블 하나를 빼거나 열 하나를 바꾼 DB에서 **기동이 멈추고 차이를 보고**한다
+- **해역 시드 생성본 (개정 19, 계획서 7.4절)**: SD2 — 고른 DB용 생성본 적용 결과 = `load_seeds` 결과(행 단위), 시드에서 행 하나를 지운 생성본을 다시 적용하면 그 행이 사라진다. 다른 DB용은 생성까지. 생성본은 한 트랜잭션에서 `DELETE` 후 전체 삽입(MySQL `TRUNCATE` 금지 — 암묵 커밋), 실수는 왕복 가능한 표기, 머리에 시드 파일 해시. SD4 — 커밋된 생성본 = 지금 시드로 만든 생성기 출력(바이트 단위, DB 없이 게이트 안)
 - 콜레이션 검사: `txt_seas_raw`에 `"전남 여수"`와 `"전남 여수 "`를 넣고 **정규화 키로는 같고 원문 비교로는 다르게** 나오는지
 - 다른 DB용 DDL 생성본은 **생성까지** 확인한다(파일이 만들어지고 비어 있지 않다)
 

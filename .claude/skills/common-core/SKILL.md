@@ -20,7 +20,7 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 | `common/queue/` | 큐 인터페이스 + NATS·인메모리 구현, 단계 간 알림 스키마 검사 (③-6) |
 | `common/geo/` | 도분초 변환, 좌표 폐구간 검증, 거리 계산 (③-7) |
 | `common/farm_sites/` | 양식장 좌표 읽기 · 폐구간 검증 호출 (③-8) |
-| `common/contract_check/` | 기동 시 검사 — 테이블 존재·형태, 입력 단계 계약 버전, 운영 조정 스키마 (③-9) |
+| `common/contract_check/` | 기동 시 검사 — 테이블 존재·형태, 입력 단계 계약 버전, 운영 조정 스키마, 빈 해역 시드 (③-9) |
 | `common/metrics/` | 운영 지표 (③-13) |
 | `collector/main.py` | 수집 진입점 — 워크로드 명령마다 원천 어댑터를 부른다 (③-12) |
 | `processor/main.py` | 가공 진입점 — `process`·`reprocess` (③-12) |
@@ -184,6 +184,8 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 - 값은 **기동 시 한 번 읽는다.** 실행 중 다시 읽지 않는다 — 어느 판정이 어느 설정으로 났는지 추적할 수 있게 한다. ConfigMap 변경의 반영은 롤아웃(재시작)이며 방식은 인프라가 구성한다
 
 - **테이블 검사**: 이 모듈이 기대하는 테이블이 없거나 정의와 다르면 기동 시 멈추고 차이를 보고한다. 스스로 만들지 않는다(2.0.3절)
+- **빈 해역 시드 검사 (개정 19, 4.3절)**: 테이블 검사 다음에 — `grading`은 `areas`, `evaluation`(`evaluate`·`sweep`, `gate` 제외)은 `areas`·`axis_coverage`가 0행이면 멈추고 보고한다. processor는 하지 않는다(DB 시드 표를 읽지 않는다). 일부만 빈 경우는 잡지 않는다 — `seed-check`의 몫
+- **서비스 전 시드 점검 `seed-check` (개정 19, 4.3절)**: `python -m processor.main seed-check`. `DATABASE_URL`만 — 테이블 검사만 하고 운영 조정을 읽지 않으며 DB에 쓰지 않는다(`startup()`을 타지 않는다). ① DB 세 표 = 이미지 시드 파일(빠진 행·더 있는 행·다른 값, `season_months`는 해석한 값) ② `area_aliases`·`axis_coverage`의 `area_id` ⊂ `areas` ③ 적조 현재값 유효 기간 안 `bulletin_detail_areas.area_id` ⊂ `areas`. 차이를 표로 보고하고 종료 코드 1. **기동 시 검사로 두지 않는다** — processor 기동을 막으면 다른 원천 적재까지 멈춘다. 시드 읽기는 `common/`(`load_seeds`·`_load_area_aliases`·SQL 생성기 공용)
 - **계약 버전 검사**: 각 이미지는 자기가 따르는 계약 버전(단계 간 알림·결과 테이블·운영 조정)을 갖고, 기동할 때 맞지 않으면 멈추고 보고한다. 옛 형식을 새 형식으로 조용히 읽지 않는다(2.1절)
 
 ### ③-10 품질 규칙 R0~R7 (4.6절)
