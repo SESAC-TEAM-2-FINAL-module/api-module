@@ -14,7 +14,8 @@ from common.config import database_url, load_definitions
 from common.farm_sites import load_farm_sites
 from common.queue import Message, Queue
 
-from ._filter import filter_stations
+from common.contract_check import QUEUE_CONTRACT, accept_message
+from common.idw_inputs import filter_stations
 from ._idw import idw_estimate
 from ._loocv import compute_loocv
 
@@ -93,6 +94,8 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
     IDW → 가중치 기록 → 오차 조회/산출 → 적재 → interp.done 발행.
     멱등: (load_id, metric) 고유 제약이 같은 알림을 막는다.
     """
+    if not accept_message(payload, "obs.loaded", repo):
+        return
     if payload.get("source") != "tide":
         return
 
@@ -178,12 +181,14 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
     queue.publish(Message(
         topic="interp.done",
         payload={
+            "schema": QUEUE_CONTRACT,
+            "topic": "interp.done",
             "run_id": run_id,
             "load_id": load_id,
             "farm_count": farm_count,
             "metric": metric,
             "error_p95": error_p95,
-            "stations_used": [o["station_id"] for o in used_obs],
+            "stations_used": len(used_obs),
         },
     ))
 

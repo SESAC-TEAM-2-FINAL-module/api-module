@@ -6,5 +6,5 @@
   "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "git_sha": "59e263a",
   "built_at_utc": "2026-09-30T00:00:00",
-  "contracts_version": "tables-v2 / queue-v1 / operational-v1"
+  "contracts_version": "tables-v3 / queue-v1 / operational-v1"
 }

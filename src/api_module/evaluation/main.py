@@ -9,6 +9,8 @@ from __future__ import annotations
 import sys
 from datetime import datetime, timedelta, timezone
 
+from common.clock import kst_today
+from common.contract_check import QUEUE_CONTRACT, accept_message
 from common.farm_sites import AREA_RULE, assign_area
 from common.queue._interface import Message
 from common.repository.base import AbstractRepository as BaseRepository
@@ -120,11 +122,51 @@ def handle_grade_done(
 ) -> None:
     """
     grade.done → axis_status 판정 → result.updated 발행.
-    payload: {"grade_run_id", "axis", "farm_ids"}
+    payload: {"schema", "topic", "grade_run_id", "axis", "farm_ids"}
     """
+    if not accept_message(payload, "grade.done", repo):
+        return
     axis: str = payload["axis"]
     farm_ids: list[str] = payload["farm_ids"]
     now = _now_utc()
+
+    # red_tide_risk: 수집 원천 없음 — provenance=NONE → NOT_USABLE, 그 밖 → NORMAL (4.9절, 개정 20)
+    if axis == "red_tide_risk":
+        readings_all = repo.get_farm_readings(farm_ids)
+        readings_map = {(r["farm_id"], r["axis"]): r for r in readings_all if r["axis"] == axis}
+        existing_statuses = repo.get_axis_status(farm_ids)
+        existing_map = {(r["farm_id"], r["axis"]): r for r in existing_statuses if r["axis"] == axis}
+        rows_to_write: list[dict] = []
+        for farm_id in farm_ids:
+            farm_reading = readings_map.get((farm_id, axis))
+            if farm_reading is not None and farm_reading.get("provenance") == "NONE":
+                state = "NOT_USABLE"
+                reason = farm_reading.get("none_reason")
+                basis_utc = farm_reading.get("computed_at_utc")
+            elif farm_reading is not None:
+                state = "NORMAL"
+                reason = None
+                basis_utc = farm_reading.get("computed_at_utc")
+            else:
+                continue    # 지수 행이 없으면 판정할 값이 없다 — 이 축의 상태는 NOT_USABLE·GRADING_STALE·NORMAL뿐 (4.10절)
+            row = _write_status(repo, farm_id, axis, state, reason, basis_utc, now, existing_map)
+            if row is not None:
+                rows_to_write.append(row)
+        if rows_to_write:
+            repo.upsert_axis_status(rows_to_write)
+        axes_updated = [axis] if rows_to_write else []
+        if axes_updated:
+            queue.publish(Message(
+                topic="result.updated",
+                payload={
+                    "schema": QUEUE_CONTRACT,
+                    "topic": "result.updated",
+                    "farm_ids": farm_ids,
+                    "axes": axes_updated,
+                    "updated_at_utc": now.isoformat(),
+                },
+            ))
+        return
 
     # 설정
     stale_key = _AXIS_STALE_KEY.get(axis, axis)
@@ -206,6 +248,8 @@ def handle_grade_done(
         queue.publish(Message(
             topic="result.updated",
             payload={
+                "schema": QUEUE_CONTRACT,
+                "topic": "result.updated",
                 "farm_ids": farm_ids,
                 "axes": axes_updated,
                 "updated_at_utc": now.isoformat(),
@@ -264,7 +308,7 @@ def handle_sweep(repo: BaseRepository, cfg: dict) -> None:
             if coverage_row is not None and not coverage_row.get("covered", True):
                 continue
             if coverage_row is not None and not _is_in_season_check(
-                coverage_row.get("season_months"), now.month
+                coverage_row.get("season_months"), kst_today(now).month
             ):
                 continue
 
@@ -325,6 +369,23 @@ def handle_sweep(repo: BaseRepository, cfg: dict) -> None:
                 if row:
                     rows_to_write.append(row)
 
+    # red_tide_risk: 산출 지연(GRADING_STALE)만 판정한다 — 커버리지·계절·신선도 없음 (4.9절, 개정 20)
+    if grading_stale_min is not None and latest_ingest_at is not None:
+        for farm in farms_all:
+            farm_id = farm["farm_id"]
+            reading = readings_map.get((farm_id, "red_tide_risk"))
+            if reading is not None:
+                computed_at = reading.get("computed_at_utc")
+                if computed_at is not None:
+                    since_ingest = (latest_ingest_at - computed_at).total_seconds() / 60
+                    if since_ingest > grading_stale_min:
+                        row = _write_status(
+                            repo, farm_id, "red_tide_risk", "GRADING_STALE", None,
+                            latest_ingest_at, now, existing_map,
+                        )
+                        if row:
+                            rows_to_write.append(row)
+
     if rows_to_write:
         repo.upsert_axis_status(rows_to_write)
 
@@ -357,8 +418,10 @@ def _repository():
     from sqlalchemy import create_engine
     from common.config import database_url
     from common.repository import SqlRepository
+    from common.contract_check import check_seed_tables
     repo = SqlRepository(create_engine(database_url()))
     repo.check_schema()
+    check_seed_tables(repo, ["areas", "axis_coverage"])
     return repo
 
 

@@ -113,7 +113,7 @@ class TestDdlFiles:
 
     def test_pg_ddl_generated(self):
         """PostgreSQL DDL 파일이 생성되고 내용이 있다."""
-        from common.repository.sql import generate_ddl_pg
+        from common.repository import generate_ddl_pg
         sql = generate_ddl_pg()
         assert len(sql) > 500
         path = CONTRACTS / "schema_pg.sql"
@@ -123,7 +123,7 @@ class TestDdlFiles:
 
     def test_my_ddl_generated(self):
         """MySQL DDL 파일이 생성되고 내용이 있다."""
-        from common.repository.sql import generate_ddl_my
+        from common.repository import generate_ddl_my
         sql = generate_ddl_my()
         assert len(sql) > 500
         path = CONTRACTS / "schema_my.sql"

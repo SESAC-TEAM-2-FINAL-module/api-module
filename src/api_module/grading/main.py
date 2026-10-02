@@ -11,14 +11,18 @@ import sys
 import uuid
 from datetime import date, datetime, timezone
 
+from common.clock import kst_today
 from common.config import database_url, load_definitions
+from common.contract_check import QUEUE_CONTRACT, accept_message
 from common.farm_sites import load_farm_sites, FarmSite
+from common.idw_inputs import filter_stations
 from common.queue import Message, Queue
 
 from ._chlorophyll import SURFACE_LAYER as CHL_SURFACE_LAYER, find_chlorophyll_obs
 from ._do import find_do_obs
 from ._nearest import find_nearest_obs, is_alertable_obs
 from ._red_tide import find_red_tide_reading
+from ._risk_index import compute_risk_index, check_risk_index_params
 from ._water_temp import grade_water_temp
 from ._zone import is_in_excluded_zone
 
@@ -89,8 +93,10 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
     obs.loaded → 물때·풍속·기온·염분·DO·클로로필·적조 축 갱신.
     수온은 interp.done 경로로 별도 갱신.
     """
+    if not accept_message(payload, "obs.loaded", repo):
+        return
     now = _utcnow()
-    today = now.date()
+    today = kst_today(now)          # day_report(KST 날짜)와 비교하는 유효 기간 기준일
 
     g_cfg = _grading_cfg(defs)
     b_cfg = _bulletin_cfg(defs)
@@ -333,9 +339,13 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
         readings.append(rt_row)
         history.append({**rt_row, "ts_utc": now})
 
-    if readings:
-        repo.upsert_farm_readings(readings)
-        repo.upsert_farm_reading_history(history)
+    # 입력 축 행과 지수(세 표)·두 축의 이력을 한 트랜잭션에 쓴다. 지수는 같은 트랜잭션에서
+    # 방금 쓴 입력 축 현재값으로 계산한다 (4.10절, 개정 20)
+    with repo.transaction() as tr:
+        if readings:
+            tr.upsert_farm_readings(readings)
+            tr.upsert_farm_reading_history(history)
+        ri_farm_ids = _write_risk_index(tr, farm_ids, defs, now)
 
     # 갱신한 축마다 grade.done 하나 — evaluation은 axis 하나씩 판정한다 (2.2절, queue-v1 grade_done)
     grade_run_id = str(uuid.uuid4())
@@ -344,6 +354,8 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
         by_axis.setdefault(r["axis"], []).append(r["farm_id"])
     for axis, ids in by_axis.items():
         _publish_grade_done(queue, grade_run_id, axis, ids)
+    if ri_farm_ids:
+        _publish_grade_done(queue, grade_run_id, "red_tide_risk", ri_farm_ids)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -353,8 +365,11 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
 def handle_interp_done(payload: dict, repo, queue: Queue, defs: dict) -> None:
     """
     interp.done → 수온 farm_readings 갱신.
-    run_id로 가중치 읽어 station 관측값 × 가중치 = 양식장별 추정값 재계산.
+    run_id의 기준 시각·가중치와 IDW와 같은 입력 선택 규칙으로 그 실행의 추정값을 재현한다.
+    가중치를 받은 관측소의 값을 못 찾으면 남은 가중치로 다시 나누지 않는다 — NONE (최근접 대체 금지).
     """
+    if not accept_message(payload, "interp.done", repo):
+        return
     run_id = payload.get("run_id")
     error_p95 = payload.get("error_p95")
     if not run_id:
@@ -378,12 +393,19 @@ def handle_interp_done(payload: dict, repo, queue: Queue, defs: dict) -> None:
         log.warning("interpolation_weights 없음: run_id=%s", run_id)
         return
 
-    # 관측소별 최신 관측 (ref_time_utc 기준 조회는 이미 인터폴레이션이 수행 — 여기서는 가중치 재사용)
-    station_obs = repo.get_latest_observations_by_metric("water_temp")
-    obs_map: dict[str, float] = {}
-    for obs in station_obs:
-        if obs.get("value") is not None and obs.get("missing_reason") is None:
-            obs_map[obs["station_id"]] = float(obs["value"])
+    i_cfg = defs.get("interpolation", {})
+    align_window_min = int(i_cfg["align_window_min"])
+    exclude_flatline = i_cfg.get("exclude_flatline")
+    if _is_pending(exclude_flatline):
+        exclude_flatline = None
+    station_coords = {r["id"]: {"lat": r["lat"], "lng": r["lng"]} for r in repo.get_stations(source_api="tide")}
+    obs_map: dict[str, float] = {
+        o["station_id"]: o["value"]
+        for o in filter_stations(
+            repo.get_recent_observations("water_temp", ref_time_utc, align_window_min + 1),
+            station_coords, ref_time_utc, align_window_min, exclude_flatline,
+        )
+    }
 
     # farm_id별 가중치 그룹
     from collections import defaultdict
@@ -407,15 +429,18 @@ def handle_interp_done(payload: dict, repo, queue: Queue, defs: dict) -> None:
 
         in_excl = is_in_excluded_zone(farm.lat, farm.lng, excluded_zones)
 
-        # 가중치 재적용으로 추정값 계산
-        total_w = sum(w["weight"] for w in wlist if w["station_id"] in obs_map)
-        if total_w <= 0:
+        missing = [w["station_id"] for w in wlist if w["station_id"] not in obs_map]
+        if missing:
+            log.error("run_id=%s farm=%s 가중치 관측소의 기준 시각 관측 없음: %s — 재현 불가, NONE",
+                      run_id, farm_id, missing)
+            row = {**_make_none_row(farm_id, "water_temp", now, "NO_INPUT", derivation="COMPUTED"),
+                   "validated_scope": "STATION_SITES", "source_ref": run_id, "observed_at_utc": ref_time_utc}
+            readings.append(row)
+            history.append({**row, "ts_utc": now})
+            farm_ids.append(farm_id)
             continue
 
-        value = sum(
-            float(obs_map[w["station_id"]]) * float(w["weight"])
-            for w in wlist if w["station_id"] in obs_map
-        ) / total_w
+        value = sum(float(obs_map[w["station_id"]]) * float(w["weight"]) for w in wlist)
 
         prov, lower, upper, derivation, none_reason = grade_water_temp(value, error_p95, thresholds)
 
@@ -445,23 +470,103 @@ def handle_interp_done(payload: dict, repo, queue: Queue, defs: dict) -> None:
         history.append({**row, "ts_utc": now})
         farm_ids.append(farm_id)
 
+    # 수온 행과 지수(세 표)·두 축의 이력을 한 트랜잭션에 쓴다 — 지수는 방금 쓴 수온으로 계산 (4.10절)
+    ri_farm_ids: list[str] = []
     if readings:
-        repo.upsert_farm_readings(readings)
-        repo.upsert_farm_reading_history(history)
+        with repo.transaction() as tr:
+            tr.upsert_farm_readings(readings)
+            tr.upsert_farm_reading_history(history)
+            ri_farm_ids = _write_risk_index(tr, farm_ids, defs, now)
 
-    _publish_grade_done(queue, str(uuid.uuid4()), "water_temp", farm_ids)
+    grade_run_id = str(uuid.uuid4())
+    _publish_grade_done(queue, grade_run_id, "water_temp", farm_ids)
+    if ri_farm_ids:
+        _publish_grade_done(queue, grade_run_id, "red_tide_risk", ri_farm_ids)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 헬퍼
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _write_risk_index(tr, farm_ids: list[str], defs: dict, now) -> list[str]:
+    """
+    트랜잭션 안에서 양식장마다 지수를 계산해 세 표와 지수 이력을 쓴다 (4.10절).
+    tr은 입력 축 행을 이미 쓴 트랜잭션의 저장소다 — 계산은 그 현재값을 읽는다. 반환: 지수를 쓴 양식장
+    """
+    readings: list[dict] = []
+    factor_rows: list[dict] = []
+    level_rows: list[dict] = []
+    delete_factor_ids: list[str] = []
+    delete_level_ids: list[str] = []
+    for farm_id in farm_ids:
+        reading, factors, level = _compute_risk_for_farm(farm_id, tr, defs, now)
+        readings.append(reading)
+        if factors:
+            factor_rows.extend(factors)
+        else:
+            delete_factor_ids.append(farm_id)
+        if level is not None:
+            level_rows.append(level)
+        else:
+            delete_level_ids.append(farm_id)
+    if readings:
+        tr.upsert_farm_readings(readings)
+        tr.upsert_farm_reading_history([{**r, "ts_utc": now} for r in readings])
+    if delete_factor_ids:
+        tr.delete_risk_index_factors_by_farm(delete_factor_ids)
+    if factor_rows:
+        tr.upsert_risk_index_factors(factor_rows)
+    if delete_level_ids:
+        tr.delete_risk_index_levels_by_farm(delete_level_ids)
+    if level_rows:
+        tr.upsert_risk_index_levels(level_rows)
+    return [r["farm_id"] for r in readings]
+
+
+def _compute_risk_for_farm(
+    farm_id: str,
+    repo,
+    defs: dict,
+    now,
+):
+    """
+    한 양식장의 적조 위험도 지수를 계산한다 (4.10절).
+    repo는 트랜잭션 안의 repo여야 한다 — 입력 축 farm_readings를 그 트랜잭션의 현재값으로 읽는다.
+    """
+    axis_rows = repo.get_farm_readings_for_risk_index(farm_id)
+    input_readings: dict[str, dict | None] = {r["axis"]: r for r in axis_rows}
+    for ax in ("red_tide", "water_temp", "salinity", "chlorophyll"):
+        input_readings.setdefault(ax, None)
+
+    # OK 조건 ③ flags 조회 (salinity·chlorophyll만)
+    input_flags: dict[str, object | None] = {
+        "red_tide": None, "water_temp": None, "salinity": None, "chlorophyll": None,
+    }
+    sal_row = input_readings.get("salinity")
+    if sal_row and sal_row.get("source_ref") and sal_row.get("observed_at_utc"):
+        input_flags["salinity"] = repo.get_obs_flags(
+            sal_row["source_ref"], sal_row["observed_at_utc"], "salinity"
+        )
+    chl_row = input_readings.get("chlorophyll")
+    if chl_row and chl_row.get("source_ref") and chl_row.get("observed_at_utc"):
+        # source_ref = "station_id@observed_at_utc"
+        src = chl_row["source_ref"]
+        at_sep = src.rfind("@")
+        if at_sep > 0:
+            chl_station = src[:at_sep]
+            input_flags["chlorophyll"] = repo.get_survey_obs_flags(
+                chl_station, chl_row["observed_at_utc"], CHL_SURFACE_LAYER, "chlorophyll"
+            )
+
+    return compute_risk_index(farm_id, input_readings, input_flags, defs, now)
+
+
 def _publish_grade_done(queue: Queue, grade_run_id: str, axis: str, farm_ids: list[str]) -> None:
     """grade.done — 계약 queue-v1 grade_done (schema·topic·grade_run_id·axis·farm_ids)"""
     queue.publish(Message(
         topic="grade.done",
         payload={
-            "schema": "queue-v1",
+            "schema": QUEUE_CONTRACT,
             "topic": "grade.done",
             "grade_run_id": grade_run_id,
             "axis": axis,
@@ -508,8 +613,15 @@ def main(argv: list[str] | None = None) -> None:
     engine = create_engine(database_url())
     repo = SqlRepository(engine)
     repo.check_schema()
+    from common.contract_check import check_seed_tables
+    check_seed_tables(repo, ["areas"])
 
     defs = load_definitions()
+
+    # K9: 값이 정해진 위험도 지수 파라미터만 검사 (<미결>이면 건너뜀)
+    violations = check_risk_index_params(defs)
+    if violations:
+        raise SystemExit("risk_index 파라미터 전제 위반 — 기동 멈춤:\n" + "\n".join(f"  {v}" for v in violations))
 
     from common.queue import MemoryQueue
 

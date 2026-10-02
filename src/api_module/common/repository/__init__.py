@@ -1,5 +1,6 @@
 from .base import AbstractRepository
-from .sql import SqlRepository, generate_ddl_pg, generate_ddl_my
+from .dialect import generate_ddl_my, generate_ddl_pg, generate_seed_sql_pg, generate_seed_sql_my
+from .sql import SqlRepository
 from . import tables
 
 __all__ = [
@@ -7,5 +8,7 @@ __all__ = [
     "SqlRepository",
     "generate_ddl_pg",
     "generate_ddl_my",
+    "generate_seed_sql_pg",
+    "generate_seed_sql_my",
     "tables",
 ]

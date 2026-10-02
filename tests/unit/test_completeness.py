@@ -32,17 +32,32 @@ def test_total_count_mismatch():
 # --- N7: 필터 무시 ---
 
 def test_N7_filter_ignored():
-    """필터 창 2024년 요청, 1997년 행 반환 → FILTER_IGNORED"""
-    pr = _pr()
-    rows = [{"date": "19970101"}, {"date": "20240601"}]
-    r = check_completeness(pr, rows, "fishery", request_window=("20240101", "20241231"))
+    """필터 창 2024년 요청, 1997년 행 반환 → FILTER_IGNORED (원문 항목 날짜로 — 어장환경 DATE_Y/M/D)"""
+    pr = _pr(items=[{"DATE_Y": "1997", "DATE_M": "1", "DATE_D": "1"}, {"DATE_Y": "2024", "DATE_M": "6", "DATE_D": "1"}])
+    r = check_completeness(pr, [], "femoSeaList", request_window=("20240101", "20241231"))
     assert r.status == "FILTER_IGNORED"
 
 
 def test_filter_all_in_window():
-    pr = _pr()
-    rows = [{"date": "20240601"}, {"date": "20240901"}]
-    r = check_completeness(pr, rows, "fishery", request_window=("20240101", "20241231"))
+    pr = _pr(items=[{"DATE_Y": "2024", "DATE_M": "6", "DATE_D": "1"}, {"DATE_Y": "2024", "DATE_M": "9", "DATE_D": "1"}])
+    r = check_completeness(pr, [], "femoSeaList", request_window=("20240101", "20241231"))
+    assert r.status == "OK"
+
+
+@pytest.mark.parametrize("api,inside,outside", [
+    ("redtideList", {"day_report": "20260810"}, {"day_report": "20250101"}),
+    ("sooList", {"obs_dtm": "2026-08-10 09:00"}, {"obs_dtm": "1999-02-01 09:00"}),
+    ("femoSeaList-watch", {"DATE_Y": "2026", "DATE_M": "8", "DATE_D": "10"}, {"DATE_Y": "1997", "DATE_M": "1", "DATE_D": "1"}),
+])
+def test_filter_ignored_reads_raw_item_dates_per_api(api, inside, outside):
+    """C9 — 정기 경로도 원문 항목의 날짜 필드를 API별로 읽는다 (어댑터 행에는 date 키가 없다)"""
+    window = ("20260801", "20260830")
+    assert check_completeness(_pr(items=[inside]), [], api, request_window=window).status == "OK"
+    assert check_completeness(_pr(items=[inside, outside]), [], api, request_window=window).status == "FILTER_IGNORED"
+
+
+def test_unreadable_item_date_is_not_judged():
+    r = check_completeness(_pr(items=[{"day_report": ""}]), [], "redtideList", request_window=("20260801", "20260830"))
     assert r.status == "OK"
 
 

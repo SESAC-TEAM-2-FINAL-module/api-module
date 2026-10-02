@@ -510,3 +510,21 @@ class TestB7Gate:
         }
         errors = validate_schema(cfg)
         assert len(errors) > 0
+
+
+# ── C13 — 계절 판정은 KST 월 ───────────────────────────────────────────────────
+
+@pytest.mark.parametrize("ref_utc,state_is_out", [
+    ("2026-10-31T14:59:00", False),   # KST 10-31 23:59 — 계절 [5..10] 안
+    ("2026-10-31T15:00:00", True),    # KST 11-01 00:00 — 계절 밖 (UTC로는 아직 10월)
+    ("2026-04-30T15:00:00", False),   # KST 05-01 00:00 — 계절 안 (UTC로는 4월)
+])
+def test_season_uses_kst_month(ref_utc, state_is_out):
+    from datetime import datetime
+    from evaluation._state import determine_state
+    state, _, _ = determine_state(
+        axis="red_tide", farm_reading=None,
+        coverage_row={"covered": True, "season_months": [5, 6, 7, 8, 9, 10]},
+        adapter_health_row=None, latest_ingest_result=None, pub_checks=[], stale_suspect_flags=None,
+        stale_threshold_hours=72, ref_utc=datetime.fromisoformat(ref_utc))
+    assert (state == "OUT_OF_SEASON") is state_is_out

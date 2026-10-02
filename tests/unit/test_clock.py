@@ -48,3 +48,25 @@ def test_split_by_month_covers_without_gap():
     assert parts[-1][1] == date(2026, 11, 30)
     for (_, e0), (s1, _) in zip(parts, parts[1:]):
         assert (s1 - e0).days == 1
+
+
+# ── C10 — KST→UTC 변환 실패 시 KST 문자열을 그대로 넘기지 않는다 (5.2절) ─────────
+
+import pytest
+
+
+@pytest.mark.parametrize("kst,utc", [
+    ("2026-08-01 09:00:00", "2026-08-01T00:00:00"),
+    ("2026-08-01T09:00:00", "2026-08-01T00:00:00"),
+    ("2026-08-01 09:00", "2026-08-01T00:00:00"),
+    (" 2026-01-01 05:30 ", "2025-12-31T20:30:00"),
+])
+def test_kst_naive_to_utc_iso(kst, utc):
+    from common.clock import kst_naive_to_utc_iso
+    assert kst_naive_to_utc_iso(kst) == utc
+
+
+@pytest.mark.parametrize("bad", [None, "", "2026/08/01 09:00", "20260801 0900", "2026-08-01", "2026-13-01 09:00"])
+def test_kst_naive_to_utc_iso_unreadable_is_none(bad):
+    from common.clock import kst_naive_to_utc_iso
+    assert kst_naive_to_utc_iso(bad) is None

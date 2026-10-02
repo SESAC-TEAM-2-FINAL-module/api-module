@@ -10,12 +10,14 @@ from typing import Protocol
 
 from common.classifier import ParsedResponse, parse
 from common.config import load_definitions, load_operational, operational_hash
+from common.contract_check import accept_message
 from common.queue import Queue, Message, MemoryQueue
 from common.sources import source_of
 from common.raw_store import get_raw_body, get_raw_meta
 from common.metrics import (processor_parse_failure_total, operational_config_info,
                             bulletin_window_missing_total, bulletin_window_check_skipped_total)
 from processor.completeness import check_completeness
+from processor.completeness._checker import requested_window
 from processor.quality import apply_quality
 from processor._load import load, _storage_tag
 
@@ -114,6 +116,7 @@ def _process_one(raw_id: str, api: str, queue: Queue) -> None:
         pr = ParsedResponse(parse_status="PARSE_FAILURE")
         rows: list[dict] = []
         completeness = None
+        untimed = 0
     else:
         pr = parse(body)
         if pr.parse_status == "PARSE_FAILURE":
@@ -121,8 +124,13 @@ def _process_one(raw_id: str, api: str, queue: Queue) -> None:
         raw_meta = {**meta, "raw_id": raw_id, "fetched_at_utc": meta.get("fetched_at")}
         raw_meta.update(_watch_meta(api, raw_id))
         rows = adapter.interpret(pr, raw_meta)
+        # 관측 시각을 읽지 못한 행은 키를 만들 수 없다 — 추정하지 않고 건너뛰고 적재 때 기록한다 (5.2절)
+        timed = [r for r in rows if not ("observed_at_utc" in r and r["observed_at_utc"] is None)]
+        untimed, rows = len(rows) - len(timed), timed
         rows = adapter.normalize(rows)
-        completeness = check_completeness(pr, rows, api, actual_items=len(pr.items))
+        sdate, edate = requested_window(meta)
+        completeness = check_completeness(pr, rows, api, actual_items=len(pr.items),
+                                          request_window=(sdate, edate) if sdate and edate else None)
         rows = apply_quality(rows, api, _CONFIG["definitions"], operational=_CONFIG["operational"])
 
     # 적재 — 한 트랜잭션. 예외가 나면 알림을 내지 않는다 (I-12)
@@ -130,6 +138,7 @@ def _process_one(raw_id: str, api: str, queue: Queue) -> None:
         _CONFIG["repo"],
         storage_key=raw_id, api=api, meta=meta, body=body, pr=pr, rows=rows,
         completeness=completeness, adapter=adapter, parser_version=PARSER_VERSION, now_utc=_now_utc(),
+        untimed_rows=untimed,
     )
     # 적조 직전 원문 대조 지표 — 커밋 뒤 (3.3절, 개정 18)
     if result.window_missing:
@@ -169,6 +178,15 @@ def process(raw_id: str, api: str, queue: Queue | None = None) -> None:
     if queue is None:
         queue = MemoryQueue()
     _process_one(raw_id, api, queue)
+
+
+def handle_raw_fetched(payload: dict, queue: Queue) -> None:
+    """raw.fetched 컨슈머 — 계약 버전이 다르면 처리하지 않는다 (2.2절)"""
+    if not _CONFIG:
+        raise RuntimeError("processor.startup() 전에 처리 호출 — 설정 미주입")
+    if not accept_message(payload, "raw.fetched", _CONFIG["repo"]):
+        return
+    _process_one(payload["raw_id"], payload["api"], queue)
 
 
 def reprocess(raw_ids: list[str], api: str, queue: Queue | None = None) -> None:
@@ -225,7 +243,22 @@ if __name__ == "__main__":
     p2.add_argument("--raw-id-from", type=int, required=True)
     p2.add_argument("--raw-id-to", type=int, required=True)
     sub.add_parser("completeness-check")   # 분할 합산 검사기 — completeness.collected 컨슈머 (3.3절, KEDA 밖 1대)
+    sub.add_parser("seed-check")           # 해역 시드 점검 — startup() 없이 DB 대조 (4.3절, 개정 19)
     args = p.parse_args()
+    if args.cmd == "seed-check":
+        # startup()·_load_adapters() 없이 돈다 — 운영 조정 읽기 없음 (4.3절, 개정 19)
+        from sqlalchemy import create_engine as _ce
+        from common.config import load_definitions as _ld, database_url as _dbu
+        from common.repository.sql import SqlRepository as _SR
+        from common.seeds import compare_seed_tables as _cst
+        _engine = _ce(_dbu())
+        _repo = _SR(_engine)
+        _repo.check_schema()
+        _diffs = _cst(_repo, _ld())
+        for _line in _diffs:
+            print(_line)
+        print(f"[seed-check] 차이 {len(_diffs)}건")
+        sys.exit(1 if _diffs else 0)
     _m._load_adapters()
     _m.startup()
     if args.cmd == "process":
@@ -239,4 +272,4 @@ if __name__ == "__main__":
     else:
         # 명령 없음 = raw.fetched 컨슈머 (handoff/k8s/processor.yaml Deployment)
         _q = MemoryQueue()
-        _q.subscribe("raw.fetched", lambda msg: _m.process(msg.payload["raw_id"], msg.payload["api"], _q))
+        _q.subscribe("raw.fetched", lambda msg: _m.handle_raw_fetched(msg.payload, _q))

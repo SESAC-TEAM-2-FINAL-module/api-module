@@ -137,6 +137,7 @@ def load(
     adapter,
     parser_version: str,
     now_utc: datetime,
+    untimed_rows: int = 0,
 ) -> LoadResult:
     status = response_status(pr, meta, completeness)
     with repo.transaction() as tx:
@@ -177,6 +178,9 @@ def load(
             _update_health(tx, api, status, meta, now_utc)
 
         events = []
+        if untimed_rows:
+            events.append({"event_type": "LOAD_ROWS_SKIPPED", "api": api, "occurred_at_utc": now_utc,
+                           "detail": {"raw_id": raw_id, "reason": "observed_at_utc 변환 실패", "rows": untimed_rows}})
         window = _check_bulletin_window(api, first_time, status, body, storage_key, meta, pr)
         if window is not None and window.missing:
             events.append({

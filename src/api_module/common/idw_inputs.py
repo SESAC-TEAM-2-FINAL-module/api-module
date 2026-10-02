@@ -1,4 +1,4 @@
-"""관측소 사용 여부 필터 — 4.6절, 4.7절, Q7."""
+"""IDW 입력 관측 선택 (4.6절, 4.7절, Q7) — interpolation이 고르고, grading이 같은 규칙으로 run_id의 값을 재현한다."""
 from __future__ import annotations
 
 import math
@@ -13,17 +13,13 @@ def filter_stations(
     exclude_flatline: object,
 ) -> list[dict]:
     """
-    IDW 입력 관측소 필터 (4.7절).
-    제외 조건:
-      - missing_reason 있음 (STATION_INACTIVE 포함)
-      - value 없음 / NaN
-      - SENSOR_QUALITY 플래그 포함 (4.6절 R3·R4)
-      - observed_at_utc가 [ref_time - align_window_min, ref_time] 밖
-      - exclude_flatline 설정 시 STALE_SUSPECT 플래그 포함
+    관측소마다 정렬 창 [ref_time - align_window_min, ref_time] 안의 **최신 유효값 하나**.
+    제외: missing_reason 있음(STATION_INACTIVE 포함), value 없음·NaN, SENSOR_QUALITY(R3·R4),
+    exclude_flatline 설정 시 STALE_SUSPECT, 좌표 없는 관측소.
     """
     cutoff = ref_time - timedelta(minutes=align_window_min)
 
-    used = []
+    latest: dict[str, dict] = {}
     for obs in observations:
         if obs.get("missing_reason"):
             continue
@@ -58,12 +54,15 @@ def filter_stations(
         if not coords:
             continue
 
-        used.append({
+        prev = latest.get(sid)
+        if prev is not None and prev["observed_at_utc"] >= obs_at:
+            continue
+        latest[sid] = {
             "station_id": sid,
             "lat": float(coords["lat"]),
             "lng": float(coords["lng"]),
             "value": float(v),
             "observed_at_utc": obs_at,
-        })
+        }
 
-    return used
+    return [latest[sid] for sid in sorted(latest)]

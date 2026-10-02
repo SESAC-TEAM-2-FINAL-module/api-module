@@ -346,3 +346,45 @@ class TestParseDensity:
 
     def test_float_string(self):
         assert _parse_density("3.5") == 3.5
+
+
+# ── C11 — 별칭·해역 시드가 없거나 깨지면 빈 값으로 대체하지 않고 멈춘다 ──────────
+
+class TestSeedsStopInsteadOfEmpty:
+    @staticmethod
+    def _seed_dir(tmp_path, monkeypatch, text: str | None, filename: str = "area_aliases.yaml"):
+        import common.seeds as seeds_mod
+        import processor.adapters.bulletin._adapter as ad
+        import processor.adapters.bulletin._seed as sd
+        if text is not None:
+            (tmp_path / filename).write_text(text, "utf-8")
+        monkeypatch.setattr(seeds_mod, "_SEEDS_DIR", tmp_path)
+        return ad, sd
+
+    @pytest.mark.parametrize("text", [None, "", "aliases: []\n", "other: 1\n",
+                                      "aliases:\n  - alias_key: 경남 통영\n"])
+    def test_alias_seed_missing_empty_or_malformed_stops(self, tmp_path, monkeypatch, text):
+        ad, _ = self._seed_dir(tmp_path, monkeypatch, text)
+        with pytest.raises(RuntimeError):
+            ad._load_area_aliases()
+        with pytest.raises(RuntimeError):
+            ad.BulletinProcessorAdapter().configure({}, {})
+
+    def test_alias_seed_valid(self, tmp_path, monkeypatch):
+        ad, _ = self._seed_dir(tmp_path, monkeypatch,
+                               "aliases:\n  - alias_key: 경남 통영\n    area_id: gyeongnam_tongyeong\n")
+        assert ad._load_area_aliases() == {"경남 통영": "gyeongnam_tongyeong"}
+
+    def test_real_seed_loads(self):
+        from processor.adapters.bulletin._adapter import _load_area_aliases
+        assert _load_area_aliases()
+
+    def test_db_seed_loader_stops_on_missing_file(self, tmp_path, monkeypatch):
+        _, sd = self._seed_dir(tmp_path, monkeypatch, None)
+
+        class _Repo:
+            def __getattr__(self, name):
+                return lambda rows: None
+
+        with pytest.raises(RuntimeError):
+            sd.load_seeds(_Repo())

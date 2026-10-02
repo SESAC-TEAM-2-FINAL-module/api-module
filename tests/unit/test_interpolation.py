@@ -136,7 +136,7 @@ class TestQ7Filter:
 
     def test_sensor_quality_excluded(self):
         """SENSOR_QUALITY 플래그 관측소 A는 필터 결과에 없다."""
-        from interpolation._filter import filter_stations
+        from common.idw_inputs import filter_stations
 
         result = filter_stations(
             self._make_obs(), self.STATION_COORDS,
@@ -147,7 +147,7 @@ class TestQ7Filter:
 
     def test_outside_window_excluded(self):
         """정렬 창 밖(창+1분) 관측소 B는 필터 결과에 없다."""
-        from interpolation._filter import filter_stations
+        from common.idw_inputs import filter_stations
 
         result = filter_stations(
             self._make_obs(), self.STATION_COORDS,
@@ -158,7 +158,7 @@ class TestQ7Filter:
 
     def test_inside_window_included(self):
         """창 안 관측소 C는 필터 결과에 있다."""
-        from interpolation._filter import filter_stations
+        from common.idw_inputs import filter_stations
 
         result = filter_stations(
             self._make_obs(), self.STATION_COORDS,
@@ -169,7 +169,7 @@ class TestQ7Filter:
 
     def test_only_c_remains(self):
         """필터 후 C만 남는다."""
-        from interpolation._filter import filter_stations
+        from common.idw_inputs import filter_stations
 
         result = filter_stations(
             self._make_obs(), self.STATION_COORDS,
@@ -180,7 +180,7 @@ class TestQ7Filter:
 
     def test_missing_reason_excluded(self):
         """missing_reason이 있는 관측소는 제외된다."""
-        from interpolation._filter import filter_stations
+        from common.idw_inputs import filter_stations
 
         obs = [
             {
@@ -199,7 +199,7 @@ class TestQ7Filter:
 
     def test_stale_suspect_excluded_when_flatline_set(self):
         """exclude_flatline이 설정된 경우 STALE_SUSPECT 관측소는 제외된다."""
-        from interpolation._filter import filter_stations
+        from common.idw_inputs import filter_stations
 
         obs = [
             {
@@ -220,6 +220,22 @@ class TestQ7Filter:
         )
         assert result_with == [], "exclude_flatline=True: STALE_SUSPECT 제외"
         assert len(result_without) == 1, "exclude_flatline=None: STALE_SUSPECT 포함"
+
+    def test_latest_valid_value_per_station(self):
+        """같은 관측소가 창 안에 여러 번 있으면 최신 유효값 하나만 (4.7절) — 최신값이 SENSOR_QUALITY면 그 앞 값"""
+        from common.idw_inputs import filter_stations
+
+        def o(minutes_before, value, flags=()):
+            return {"station_id": "tide:C", "observed_at_utc": self.REF_TIME - timedelta(minutes=minutes_before),
+                    "value": value, "missing_reason": None, "flags": list(flags)}
+
+        result = filter_stations([o(20, 21.0), o(5, 22.0), o(12, 21.5)], self.STATION_COORDS,
+                                 self.REF_TIME, self.WINDOW_MIN, exclude_flatline=None)
+        assert [(r["station_id"], r["value"]) for r in result] == [("tide:C", 22.0)]
+
+        result = filter_stations([o(20, 21.0), o(5, 99.0, ["SENSOR_QUALITY"])], self.STATION_COORDS,
+                                 self.REF_TIME, self.WINDOW_MIN, exclude_flatline=None)
+        assert [r["value"] for r in result] == [21.0]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

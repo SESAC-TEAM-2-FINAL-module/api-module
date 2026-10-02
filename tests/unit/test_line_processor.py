@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 
 from common.classifier import parse
+from common.clock import kst_naive_to_utc_iso as _kst_to_utc
 from processor.adapters.line._adapter import (
     LineProcessorAdapter,
-    _kst_to_utc,
     _parse_dtm,
     _parse_value,
     _compute_group_types,
@@ -71,7 +71,7 @@ def test_kst_to_utc_midnight():
 
 
 def test_kst_to_utc_empty():
-    assert _kst_to_utc("") == ""
+    assert _kst_to_utc("") is None
 
 
 # ── group_type 분류 ───────────────────────────────────────────────────────────

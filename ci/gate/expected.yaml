@@ -37,7 +37,17 @@ settings:
       radius_km: 15
   grading.estuary_stations: [DT_0016]
   stale_threshold_hours.chlorophyll: null
-  contracts: {queue: queue-v1, tables: tables-v2, operational: operational-v1}
+  risk_index.weights.nearby_bulletin: <미결>
+  risk_index.weights.water_temp_band: <미결>
+  risk_index.weights.salinity_band: <미결>
+  risk_index.weights.chlorophyll_level: <미결>
+  risk_index.factors.nearby_bulletin: <미결>
+  risk_index.factors.water_temp_band: <미결>
+  risk_index.factors.salinity_band: <미결>
+  risk_index.factors.chlorophyll_level: <미결>
+  risk_index.min_factors_ok: <미결>
+  risk_index.levels: <미결>
+  contracts: {queue: queue-v1, tables: tables-v3, operational: operational-v1}
 
 counts:
   femo_2023: {raw: 1008, stored: 1008, loaded: 1000}    # reverify_addendum 2.4 · line_depth_report_v2 B1

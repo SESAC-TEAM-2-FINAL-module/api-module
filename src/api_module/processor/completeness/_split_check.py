@@ -7,41 +7,19 @@ processor의 처리 결과(ingest_runs)를 기다리지 않는다. 중간 상태
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from urllib.parse import parse_qs, urlsplit
 
 from common.classifier import ParsedResponse, parse
+from common.contract_check import accept_message
 from common.metrics import completeness_last_checked_timestamp, completeness_mismatch_total
 from common.raw_store import get_raw_body, get_raw_meta
 from processor._load import response_status
-from processor.completeness._checker import check_split_completeness
+from processor.completeness._checker import check_split_completeness, item_date, requested_window
 
 _NORMAL = frozenset({"OK", "OK_EMPTY", "NO_DATA"})
 # INVALID 사유가 여럿이면 앞의 것 — 원문이 없으면 나머지는 볼 수 없다
 _REASON_ORDER = ("RAW_MISSING", "PART_STATUS", "WINDOW_MISMATCH", "FILTER_IGNORED")
 # "같은 결과" 비교 열 — checked_at_utc는 보지 않는다 (3.3절)
 _COMPARE = ("status", "reason", "truncated_side", "single_count", "split_sum", "parts", "window_start", "window_end")
-
-
-def _item_date(api: str, item: dict) -> str | None:
-    """요청 창 밖 행 검사용 날짜(KST, YYYYMMDD). 못 읽으면 None — 판정에 쓰지 않는다"""
-    try:
-        if api == "redtideList":
-            return str(item.get("day_report") or "")[:8] or None
-        if api == "sooList":
-            return str(item.get("obs_dtm") or "")[:10].replace("-", "") or None
-        if api == "femoSeaList":
-            return f"{int(item['DATE_Y']):04d}{int(item['DATE_M']):02d}{int(item['DATE_D']):02d}"
-    except (KeyError, TypeError, ValueError):
-        return None
-    return None
-
-
-def _requested_window(meta: dict) -> tuple[str | None, str | None]:
-    params = meta.get("params") or {}
-    if "sdate" not in params and meta.get("url"):
-        q = parse_qs(urlsplit(meta["url"]).query)
-        params = {k: v[0] for k, v in q.items()}
-    return params.get("sdate"), params.get("edate")
 
 
 def _read(api: str, raw_id: str, start: str, end: str) -> dict:
@@ -53,10 +31,10 @@ def _read(api: str, raw_id: str, start: str, end: str) -> dict:
     pr = parse(body) if body is not None else ParsedResponse(parse_status="PARSE_FAILURE")
     if response_status(pr, meta) not in _NORMAL:
         return {"reason": "PART_STATUS"}
-    if _requested_window(meta) != (start, end):
+    if requested_window(meta) != (start, end):
         return {"reason": "WINDOW_MISMATCH"}
     for item in pr.items:
-        d = _item_date(api, item)
+        d = item_date(api, item)
         if d is not None and not (start <= d <= end):
             return {"reason": "FILTER_IGNORED"}
     return {"count": len(pr.items)}
@@ -91,10 +69,7 @@ def judge(payload: dict) -> dict:
 def run_completeness_check(payload: dict, repo, now_utc: datetime | None = None) -> dict | None:
     """판정 → 기록. 같은 결과면 다시 쓰지 않고, RAW_MISSING은 판정이 난 행을 덮지 않는다 (3.3절)"""
     now = (now_utc or datetime.now(timezone.utc)).replace(tzinfo=None, microsecond=0)
-    if payload.get("schema") != "queue-v1":
-        repo.insert_ops_events([{"event_type": "CONTRACT_VERSION_MISMATCH", "api": payload.get("api"),
-                                 "occurred_at_utc": now,
-                                 "detail": {"topic": "completeness.collected", "schema": payload.get("schema")}}])
+    if not accept_message(payload, "completeness.collected", repo):
         return None
 
     row = {**judge(payload), "checked_at_utc": now}

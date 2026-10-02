@@ -10,9 +10,9 @@ import pytest
 from datetime import datetime, timedelta
 
 from common.classifier import ParsedResponse
+from common.clock import kst_naive_to_utc_iso as _kst_to_utc
 from processor.adapters.tide._adapter import (
     TideProcessorAdapter,
-    _kst_to_utc,
     _parse_value,
     _apply_flatline_flags,
     _apply_station_inactive,
@@ -66,7 +66,7 @@ def test_kst_to_utc_t_separator():
     assert _kst_to_utc("2026-01-01T09:00:00") == "2026-01-01T00:00:00"
 
 def test_kst_to_utc_empty():
-    assert _kst_to_utc("") == ""
+    assert _kst_to_utc("") is None
 
 
 # ── 0.000 결측 (R0) ─────────────────────────────────────────────────────────

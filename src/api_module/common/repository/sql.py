@@ -6,7 +6,6 @@ DDL 생성 함수도 여기에 둔다.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from contextlib import contextmanager
 from typing import Iterator
@@ -189,6 +188,73 @@ class SqlRepository(AbstractRepository):
         with self._begin() as conn:
             d.upsert(conn, t.farm_reading_history, rows,
                      ["farm_id", "axis", "ts_utc"])
+
+    # ── 적조 위험도 지수 (4.10절, 개정 20) ──────────────────────────────────
+
+    def upsert_risk_index_factors(self, rows: list[dict]) -> None:
+        rows = [_prep(r) for r in rows]
+        with self._begin() as conn:
+            d.upsert(conn, t.risk_index_factors, rows, ["farm_id", "factor"])
+
+    def upsert_risk_index_levels(self, rows: list[dict]) -> None:
+        rows = [_prep(r) for r in rows]
+        with self._begin() as conn:
+            d.upsert(conn, t.risk_index_levels, rows, ["farm_id"])
+
+    def delete_risk_index_factors_by_farm(self, farm_ids: list[str]) -> None:
+        if not farm_ids:
+            return
+        with self._begin() as conn:
+            conn.execute(
+                t.risk_index_factors.delete().where(
+                    t.risk_index_factors.c.farm_id.in_(farm_ids)
+                )
+            )
+
+    def delete_risk_index_levels_by_farm(self, farm_ids: list[str]) -> None:
+        if not farm_ids:
+            return
+        with self._begin() as conn:
+            conn.execute(
+                t.risk_index_levels.delete().where(
+                    t.risk_index_levels.c.farm_id.in_(farm_ids)
+                )
+            )
+
+    def get_farm_readings_for_risk_index(self, farm_id: str) -> list[dict]:
+        axes = ("red_tide", "water_temp", "salinity", "chlorophyll")
+        with self._connect() as conn:
+            rows = conn.execute(
+                select(t.farm_readings)
+                .where(t.farm_readings.c.farm_id == farm_id)
+                .where(t.farm_readings.c.axis.in_(axes))
+            ).mappings().all()
+        return [dict(r) for r in rows]
+
+    def get_obs_flags(
+        self, station_id: str, observed_at_utc: object, metric: str
+    ) -> object | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                select(t.observations.c.flags)
+                .where(t.observations.c.station_id == station_id)
+                .where(t.observations.c.observed_at_utc == observed_at_utc)
+                .where(t.observations.c.metric == metric)
+            ).first()
+        return row[0] if row else None
+
+    def get_survey_obs_flags(
+        self, station_id: str, observed_at_utc: object, layer: str, metric: str
+    ) -> object | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                select(t.survey_observations.c.flags)
+                .where(t.survey_observations.c.station_id == station_id)
+                .where(t.survey_observations.c.observed_at_utc == observed_at_utc)
+                .where(t.survey_observations.c.layer == layer)
+                .where(t.survey_observations.c.metric == metric)
+            ).first()
+        return row[0] if row else None
 
     # ── evaluation ───────────────────────────────────────────────────────────
 
@@ -528,6 +594,24 @@ class SqlRepository(AbstractRepository):
             ).all()
         return {r[0]: r[1] for r in rows}
 
+    def count_table_rows(self, table_name: str) -> int:
+        tbl = t.metadata.tables[table_name]
+        with self._connect() as conn:
+            return conn.execute(select(func.count()).select_from(tbl)).scalar_one()
+
+    def get_bulletin_detail_areas_in_window(self, window_days: int, ref_date: object) -> list[str]:
+        from datetime import timedelta
+        cutoff = ref_date - timedelta(days=window_days)
+        with self._connect() as conn:
+            rows = conn.execute(
+                select(t.bulletin_detail_areas.c.area_id.distinct())
+                .join(t.bulletins, t.bulletin_detail_areas.c.cod_news == t.bulletins.c.cod_news)
+                .where(t.bulletin_detail_areas.c.area_id.isnot(None))
+                .where(t.bulletins.c.day_report >= cutoff)
+                .where(t.bulletins.c.day_report <= ref_date)
+            ).scalars().all()
+        return list(rows)
+
     def check_schema(self, include: tuple[str, ...] = ()) -> None:
         """
         tables.py 모델과 실제 DB 스키마를 비교한다.
@@ -558,70 +642,6 @@ class SqlRepository(AbstractRepository):
             if missing_cols:
                 lines.append(f"  없는 컬럼: {', '.join(sorted(missing_cols))}")
             raise SystemExit("\n".join(lines))
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# DDL 생성 (contracts/tables/ 저장)
-# ─────────────────────────────────────────────────────────────────────────────
-
-_CONTRACTS_DIR = Path(__file__).parents[4] / "contracts" / "tables"
-
-
-def generate_ddl_pg(out_path: Path | None = None) -> str:
-    """PostgreSQL DDL 생성본을 반환하고 out_path에 저장한다."""
-    from sqlalchemy.dialects.postgresql import dialect as PGDialect
-    from sqlalchemy.schema import CreateTable, CreateIndex
-
-    dialect = PGDialect()
-    parts: list[str] = [
-        "-- PostgreSQL DDL — 생성본 (tables.py에서 자동 생성, 직접 수정 금지)",
-        "-- DB 소유 측이 적용한다. 마이그레이션 코드 없음 (5.4절)",
-        "",
-    ]
-    for tbl in t.metadata.sorted_tables:
-        ddl = str(CreateTable(tbl).compile(dialect=dialect)).strip()
-        parts.append(ddl + ";")
-        for idx in tbl.indexes:
-            if not idx.unique:  # unique 인덱스는 CREATE TABLE에 포함됨
-                idx_ddl = str(CreateIndex(idx).compile(dialect=dialect)).strip()
-                parts.append(idx_ddl + ";")
-        parts.append("")
-
-    sql = "\n".join(parts)
-    path = out_path or (_CONTRACTS_DIR / "schema_pg.sql")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(sql, encoding="utf-8")
-    return sql
-
-
-def generate_ddl_my(out_path: Path | None = None) -> str:
-    """MySQL DDL 생성본을 반환하고 out_path에 저장한다."""
-    from sqlalchemy.dialects.mysql import dialect as MyDialect
-    from sqlalchemy.schema import CreateTable, CreateIndex
-
-    dialect = MyDialect()
-    parts: list[str] = [
-        "-- MySQL 8.0 DDL — 생성본 (tables.py에서 자동 생성, 직접 수정 금지)",
-        "-- DB 소유 측이 적용한다. 마이그레이션 코드 없음 (5.4절)",
-        "-- charset=utf8mb4 collate=utf8mb4_0900_ai_ci (NO PAD, 뒤 공백 구분)",
-        "",
-    ]
-    for tbl in t.metadata.sorted_tables:
-        ddl = str(CreateTable(tbl).compile(dialect=dialect)).strip()
-        # MySQL에 charset·collate 추가
-        ddl = ddl.rstrip(";") + "\nCHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
-        parts.append(ddl)
-        for idx in tbl.indexes:
-            if not idx.unique:
-                idx_ddl = str(CreateIndex(idx).compile(dialect=dialect)).strip()
-                parts.append(idx_ddl + ";")
-        parts.append("")
-
-    sql = "\n".join(parts)
-    path = out_path or (_CONTRACTS_DIR / "schema_my.sql")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(sql, encoding="utf-8")
-    return sql
 
 
 # ─────────────────────────────────────────────────────────────────────────────

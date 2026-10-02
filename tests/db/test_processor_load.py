@@ -16,7 +16,7 @@ from sqlalchemy import create_engine, func, select
 
 from common.queue import MemoryQueue
 
-from .conftest import count_rows
+from .conftest import FIXTURES_RAW, count_rows
 
 _COUNTS = yaml.safe_load(
     (Path(__file__).parents[2] / "ci" / "gate" / "expected.yaml").read_text("utf-8")
@@ -263,3 +263,31 @@ def test_grading_chlorophyll_layer_matches_stored_layer(processor_up, raw_store,
     stored = {r["layer"] for r in _select(schema_engine, "survey_observations", lambda t: t.c.metric == "chlorophyll")}
     assert SURFACE_LAYER in stored
     assert repo.get_latest_survey_obs("chlorophyll", SURFACE_LAYER)
+
+
+def test_regular_path_filter_ignored_recorded(processor_up, raw_store, schema_engine):
+    """C9 — 정기 경로: 원문 항목 날짜(day_report)가 요청 창 밖이면 ingest_runs.status = FILTER_IGNORED (3.3절)"""
+    import json
+    pm, _ = processor_up
+    path = next(FIXTURES_RAW.glob("redtideList_r1_*.json"))
+    content = json.loads(path.read_text("utf-8"))
+    content["url"] = content["url"].replace("edate=20260921", "edate=20260815")   # 0816 이후 속보가 창 밖
+    content.setdefault("http_status", content.get("http"))
+    content.setdefault("fetched_at", "2026-09-20T00:00:00Z")
+    pm.process(raw_store.put("redtideList", "narrow", content), "redtideList", MemoryQueue())
+    assert [r["status"] for r in _select(schema_engine, "ingest_runs")] == ["FILTER_IGNORED"]
+
+
+def test_unreadable_observation_time_rows_skipped_not_shifted(processor_up, raw_store, schema_engine, tide):
+    """C10 — 시각을 못 읽은 관측은 KST 문자열로 적재하지 않고 건너뛰어 LOAD_ROWS_SKIPPED로 남긴다. 나머지는 UTC로"""
+    pm, _ = processor_up
+    codes = list(tide.STATIONS)
+    obs = [(codes[0], "2026/08/01 09:00", 24.0)] + [(c, "2026-08-01 09:00:00", 24.5) for c in codes[1:]]
+    pm.process(raw_store.put("dtRecent", "badtime", tide.raw(tide.body(obs))), "dtRecent", MemoryQueue())
+
+    rows = _select(schema_engine, "observations")
+    assert {r["station_id"] for r in rows} == {f"tide:{c}" for c in codes[1:]}
+    assert {r["observed_at_utc"] for r in rows} == {datetime(2026, 8, 1, 0, 0, 0)}
+    ev = [e for e in _select(schema_engine, "ops_events") if e["event_type"] == "LOAD_ROWS_SKIPPED"]
+    assert len(ev) == 1 and ev[0]["detail"]["rows"] > 0
+    assert [r["status"] for r in _select(schema_engine, "ingest_runs")] == ["OK"]

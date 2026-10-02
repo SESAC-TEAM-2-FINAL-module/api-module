@@ -251,6 +251,48 @@ class AbstractRepository(ABC):
     def get_latest_completeness_checked(self) -> dict[str, object]:
         """원천(api)별 최신 checked_at_utc."""
 
+    @abstractmethod
+    def count_table_rows(self, table_name: str) -> int:
+        """테이블 행 수를 반환한다 — 빈 시드 기동 검사용 (개정 19)."""
+
+    @abstractmethod
+    def get_bulletin_detail_areas_in_window(self, window_days: int, ref_date: object) -> list[str]:
+        """유효 기간 안 속보의 bulletin_detail_areas.area_id(NULL 제외) 목록 — seed-check ③ (개정 19)."""
+
+    # ── 적조 위험도 지수 (grading, 4.10절, 개정 20) ───────────────────────────
+
+    @abstractmethod
+    def upsert_risk_index_factors(self, rows: list[dict]) -> None:
+        """고유 (farm_id, factor) 기준 upsert."""
+
+    @abstractmethod
+    def upsert_risk_index_levels(self, rows: list[dict]) -> None:
+        """고유 farm_id 기준 upsert."""
+
+    @abstractmethod
+    def delete_risk_index_factors_by_farm(self, farm_ids: list[str]) -> None:
+        """가중치 미결(①) 또는 전 항목 미결 시 기존 행을 삭제한다 (4.10절)."""
+
+    @abstractmethod
+    def delete_risk_index_levels_by_farm(self, farm_ids: list[str]) -> None:
+        """단계 미결(④) 또는 전 항목 미결 시 기존 행을 삭제한다 (4.10절)."""
+
+    @abstractmethod
+    def get_farm_readings_for_risk_index(self, farm_id: str) -> list[dict]:
+        """한 양식장의 4개 입력 축 farm_readings 현재값 (4.10절)."""
+
+    @abstractmethod
+    def get_obs_flags(
+        self, station_id: str, observed_at_utc: object, metric: str
+    ) -> object | None:
+        """OK 조건 ③ — observations.flags (염분 SENSOR_QUALITY 확인용)."""
+
+    @abstractmethod
+    def get_survey_obs_flags(
+        self, station_id: str, observed_at_utc: object, layer: str, metric: str
+    ) -> object | None:
+        """OK 조건 ③ — survey_observations.flags (클로로필 SENSOR_QUALITY 확인용)."""
+
     # ── 기동 시 검사 ──────────────────────────────────────────────────────────
 
     @abstractmethod

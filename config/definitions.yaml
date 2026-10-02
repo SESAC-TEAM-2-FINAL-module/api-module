@@ -65,7 +65,21 @@ quality:
 stale_threshold_hours:
   chlorophyll: null   # 게시 시계 규칙 — 판정 정의 (계획서 2.0.6절)
 
+risk_index:
+  weights:
+    nearby_bulletin: <미결>
+    water_temp_band: <미결>
+    salinity_band: <미결>
+    chlorophyll_level: <미결>
+  factors:
+    nearby_bulletin: <미결>
+    water_temp_band: <미결>
+    salinity_band: <미결>
+    chlorophyll_level: <미결>
+  min_factors_ok: <미결>
+  levels: <미결>
+
 contracts:
   queue: queue-v1
-  tables: tables-v2          # 개정 14 — source_ref(DO·클로로필 = station_id@observed_at_utc)·survey_observations 키
+  tables: tables-v3          # 개정 20 — risk_index_factors·risk_index_levels·AXIS_VALS red_tide_risk 추가
   operational: operational-v1

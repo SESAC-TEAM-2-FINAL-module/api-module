@@ -13,6 +13,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+from common.clock import kst_naive_to_utc_iso
 from common.classifier import ParsedResponse
 from common.config import load_definitions
 from common.geo import validate_coords_closed
@@ -60,7 +61,7 @@ class LineProcessorAdapter:
                 continue
 
             obs_dtm_str = str(r.get("obs_dtm", "") or "").strip()
-            obs_at_utc = _kst_to_utc(obs_dtm_str)
+            obs_at_utc = kst_naive_to_utc_iso(obs_dtm_str)
             dtm = _parse_dtm(obs_dtm_str)
 
             wtr_dep_raw = r.get("wtr_dep")
@@ -180,16 +181,6 @@ class LineProcessorAdapter:
 # ── 헬퍼 ────────────────────────────────────────────────────────────────────
 
 
-def _kst_to_utc(dt_str: str) -> str:
-    """obs_dtm KST naive → UTC (-9h). SOURCES.md: 관측선 시각은 KST naive (I-4)"""
-    if not dt_str:
-        return ""
-    try:
-        dt = datetime.strptime(dt_str.strip(), "%Y-%m-%d %H:%M")
-        utc = dt - timedelta(hours=9)
-        return utc.strftime("%Y-%m-%dT%H:%M:%S")
-    except ValueError:
-        return dt_str
 
 
 def _parse_dtm(dt_str: str) -> datetime | None:

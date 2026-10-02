@@ -128,3 +128,13 @@ def test_completeness_check_command_parses(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["processor.main", "completeness-check"])
     runpy.run_module("processor.main", run_name="__main__")
 
+
+
+def test_dialect_branches_only_in_dialect_module():
+    """C14 — 방언 이름·방언 모듈은 common/repository/dialect.py 밖에 쓰지 않는다 (12절)"""
+    import re
+    pattern = re.compile(r"""['"](postgresql|mysql)['"]|dialects\.(postgresql|mysql)""")
+    allowed = _ROOT / "src" / "api_module" / "common" / "repository" / "dialect.py"
+    hits = [str(p.relative_to(_ROOT)) for p in (_ROOT / "src").rglob("*.py")
+            if p != allowed and pattern.search(p.read_text("utf-8"))]
+    assert hits == []

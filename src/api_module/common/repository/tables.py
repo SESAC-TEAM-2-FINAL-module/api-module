@@ -34,7 +34,11 @@ SOURCE_API_VALS = ("tide", "bulletin", "line", "fishery")
 AXIS_VALS = (
     "water_temp", "salinity", "tide_level", "wind_speed",
     "air_temp", "red_tide", "dissolved_oxygen", "chlorophyll",
+    "red_tide_risk",
 )
+
+FACTOR_VALS = ("nearby_bulletin", "water_temp_band", "salinity_band", "chlorophyll_level")
+EXCLUDED_REASON_VALS = ("NO_INPUT", "INPUT_NONE", "SENSOR_QUALITY", "RULE_UNDECIDED")
 
 DERIVATION_VALS = ("COMPUTED", "MEASURED", "OFFICIAL", "SURVEY")
 
@@ -438,3 +442,44 @@ axis_status = Table(
     CheckConstraint(_in("state", STATE_VALS), name="state"),
 )
 Index("pk_axis_status", axis_status.c.farm_id, axis_status.c.axis, unique=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 적조 위험도 지수 결과 테이블 (4.10절, 개정 20)
+# ─────────────────────────────────────────────────────────────────────────────
+
+risk_index_factors = Table(
+    "risk_index_factors", metadata,
+    Column("farm_id", String(64), nullable=False),
+    Column("factor", String(64), nullable=False),
+    Column("input_axis", String(64), nullable=False),
+    Column("input_value", Double, nullable=True),
+    Column("input_lower", Double, nullable=True),
+    Column("input_upper", Double, nullable=True),
+    Column("input_unit", String(64), nullable=True),
+    Column("input_grade", String(16), nullable=True),
+    Column("input_baseline", Double, nullable=True),
+    Column("score", Double, nullable=True),
+    Column("score_lower", Double, nullable=True),
+    Column("score_upper", Double, nullable=True),
+    Column("weight", Double, nullable=False),
+    Column("contribution", Double, nullable=False),
+    Column("ok", Boolean, nullable=False),
+    Column("excluded_reason", String(64), nullable=True),
+    Column("input_none_reason", String(64), nullable=True),
+    Column("source_ref", String(255), nullable=True),
+    Column("observed_at_utc", DateTime(), nullable=True),
+    Column("computed_at_utc", DateTime(), nullable=False),
+    CheckConstraint(_in("factor", FACTOR_VALS), name="factor"),
+    CheckConstraint(_in("excluded_reason", EXCLUDED_REASON_VALS), name="excluded_reason"),
+)
+Index("pk_risk_index_factors", risk_index_factors.c.farm_id, risk_index_factors.c.factor, unique=True)
+
+risk_index_levels = Table(
+    "risk_index_levels", metadata,
+    Column("farm_id", String(64), primary_key=True),
+    Column("level", String(64), nullable=False),
+    Column("level_at_lower", String(64), nullable=False),
+    Column("level_at_upper", String(64), nullable=False),
+    Column("level_straddle", Boolean, nullable=False),
+    Column("computed_at_utc", DateTime(), nullable=False),
+)

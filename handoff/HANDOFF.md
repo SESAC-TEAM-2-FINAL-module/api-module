@@ -118,14 +118,108 @@ python ci/gate/run_gate.py
 
 ## 7. 기동 시 검사 항목
 
-`processor`·`evaluation`·`evaluation-sweep`이 기동할 때 자동으로 수행:
+`processor`·`evaluation`·`evaluation-sweep`이 기동할 때 자동으로 수행(4번은 `grading`·`evaluation`·`evaluation-sweep`):
 
 1. `OPERATIONAL_CONFIG_PATH` 파일 존재 확인
 2. `contracts/config/operational.schema.json` 스키마 검사 (키 집합·타입·`<미결>` 거부·버전 일치)
 3. 기대 DB 테이블 존재·컬럼 확인
+4. **빈 해역 시드 검사** (개정 19): `grading` — `areas` 0행이면 멈춤. `evaluation`(`evaluate`·`sweep`) — `areas` 또는 `axis_coverage` 0행이면 멈춤. `gate`는 DB 없이 돌므로 제외.
 
 실패 시: **멈추고 보고** — 기본값·초기값으로 조용히 대체하지 않는다.  
 성공 시: `ops_events.OPERATIONAL_CONFIG_LOADED` + 설정 해시 기록.
+
+---
+
+## 7a. 추가 요청 — 해역 시드 운영 적재 (개정 19)
+
+### 생성본 위치와 적용 방법
+
+| 파일 | DB |
+|---|---|
+| `contracts/tables/seeds_pg.sql` | PostgreSQL |
+| `contracts/tables/seeds_my.sql` | MySQL 8.0 |
+
+DB 소유 측이 해당 생성본을 DB에 적용한다. 이 모듈은 운영 DB에 시드를 직접 쓰지 않는다 (계획서 12절 "운영 DB에 해역 시드를 쓰지 않는다").
+
+### 변경 조항
+
+시드(`seeds/*.yaml`)는 **모두의 협의 아래 파일을 고쳐 나눠 가진다** — 어느 쪽도 협의 없이 혼자 바꾸지 않는다. 파일을 고치면 api-module이 생성본을 다시 만들어 이미지와 함께 내고, DB 소유 측은 그 생성본을 DB에 적용한다. 생성본 머리의 시드 파일 해시로 같은 파일인지 확인할 수 있다.
+
+재생성 명령 (api-module 저장소 루트에서 — api-module 쪽 작업):
+```bash
+PYTHONPATH=src/api_module python -c "from common.repository import generate_seed_sql_pg, generate_seed_sql_my; generate_seed_sql_pg(); generate_seed_sql_my()"
+```
+
+### 반영 순서
+
+| 변경 종류 | 순서 |
+|---|---|
+| 추가·변경 | DB(시드 적용) → processor 롤아웃 |
+| 삭제 | processor 롤아웃 → DB(시드 적용) |
+
+이유: processor는 이미지 안의 별칭 파일로 속보 지점을 해역(`area_id`)에 대응시키고, grading은 DB의 `areas`에 있는 해역만 양식장에 대응시킨다(외래 키 없음). 순서를 거꾸로 하면 그 사이 별칭이 DB에 없는 해역을 가리키고, grading이 그 해역을 **조용히 건너뛴다**. 이미 적재된 대응은 재처리할 필요가 없다 — 롤아웃 뒤 다음 정기 적조 수집(30일 창)에서 새 별칭으로 덮인다. 그 전의 남은 불일치는 `seed-check` ③이 잡는다.
+
+### seed-check 명령
+
+서비스 시작 전과 시드 변경을 적용한 뒤 확인한다. `api-module/processor` 이미지로 돌린다(시드 파일이 들어 있다 — 수동 Job 등):
+```bash
+python -m processor.main seed-check        # 이미지 안 (PYTHONPATH 설정됨)
+```
+DB에 쓰지 않는다. 대조 항목: ① DB 세 표 = 이미지 시드 파일 ② 별칭·커버리지의 `area_id`가 `areas`에 있음 ③ 적조 현재값 유효 기간 안 속보 지점의 `area_id`가 `areas`에 있음.
+
+필요한 환경변수: `DATABASE_URL` 만. `OPERATIONAL_CONFIG_PATH` 불필요 (startup() 없이 돈다).
+
+종료 코드 0 = 일치, 1 = 불일치(차이 표준 출력).
+
+### 배포 선행 조건
+
+다음 순서를 지킨다:
+1. DDL 적용 (테이블이 없으면 다음 단계 불가)
+2. 시드 적용 (`seeds_pg.sql` 또는 `seeds_my.sql`)
+3. `seed-check` 종료 0 확인
+4. `grading`·`evaluation` 배포 — 빈 시드면 두 이미지 모두 기동하지 않는다
+
+---
+
+## 7b. 추가 요청 — 적조 위험도 지수 (개정 20)
+
+### 새 테이블
+
+| 테이블 | 역할 | 소유 이미지 |
+|---|---|---|
+| `risk_index_factors` | 지수 4개 인자별 기여도·제외 사유 | `grading` |
+| `risk_index_levels` | 지수 단계 코드(`level`)와 경계 걸침 | `grading` |
+
+두 테이블은 `tables-v3` DDL에 포함돼 있다 (`contracts/tables/schema_pg.sql` · `schema_my.sql`). 시드 없음, 별도 초기화 불필요.
+
+### 기존 테이블 정의 변경 (열 변경 없음)
+
+- **축 목록 제약(`axis` `CHECK`)에 `'red_tide_risk'` 추가** — `farm_readings`·`farm_reading_history`·`axis_status`·`axis_coverage` 4곳. 이미 만든 표는 제약을 바꿔야 한다(새 DDL을 그대로 적용하면 새 표만 생기고 기존 표의 제약은 그대로다)
+- `none_reason` 새 값 `INSUFFICIENT_FACTORS`·`RULE_UNDECIDED` — 이 열에는 `CHECK`가 없어 DB 변경 없음
+- 결과 테이블 계약 `tables-v2` → **`tables-v3`**
+
+### 적용 순서
+
+1. DB에 새 표 2개 생성 + 기존 표 4곳 `CHECK` 변경
+2. 새 이미지 배포 — 기동 시 테이블 검사가 새 표를 요구한다(없으면 `processor`·`interpolation`·`grading`·`evaluation`이 기동하지 않는다). 제약을 바꾸기 전에 배포하면 지수 행 적재가 `CHECK` 위반으로 실패한다
+
+### 파생 축 `red_tide_risk`
+
+- `farm_readings.axis = 'red_tide_risk'`로 적재된다 — 기존 결과 테이블 확장
+- `derivation = COMPUTED`, `alertable = false` (불변식)
+- `provenance`: 산출 가능 상태 = `INTERPOLATED`, 신뢰 기준 밖 = `NONE` (가중치·규칙 미결 → `RULE_UNDECIDED`, 유효 인자 부족 → `INSUFFICIENT_FACTORS`)
+- `axis_status.state`: `NORMAL` · `NOT_USABLE`(사유=`none_reason`) · `GRADING_STALE`(sweep 판정) — 커버리지·계절·신선도 상태 없음
+
+### 판정 정의 미결 항목
+
+`config/definitions.yaml`의 `risk_index.*` 키 10개가 현재 전부 `<미결>`이다 (계획서 4.10절 확정 후 개정).  
+미결 상태에서도 `grading`은 정상 기동하고 `red_tide_risk`를 `NONE/RULE_UNDECIDED`로 적재한다.  
+**값이 확정되면 `config/definitions.yaml`과 `ci/gate/expected.yaml`을 함께 갱신하고 이미지를 새로 배포한다.**
+
+### 기동 시 검사 (K9)
+
+`grading` 이미지 기동 시: `risk_index` 키 중 값이 있는 것만 검사 (가중치 합산 = 1, 점수 범위 [0,1], 단계 첫 min ≤ 0).  
+미결 키는 검사에서 건너뛴다 — `<미결>` 상태의 기동을 막지 않는다.
 
 ---
 

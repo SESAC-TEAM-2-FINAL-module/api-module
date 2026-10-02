@@ -8,6 +8,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
+from common.clock import kst_naive_to_utc_iso
 from common.classifier import ParsedResponse
 from common.config import load_definitions
 
@@ -52,7 +53,7 @@ class TideProcessorAdapter:
                 continue
             station_id = f"tide:{obs_code}"
             obs_dt_str = item.get("obsrvnDt", "")
-            observed_at_utc = _kst_to_utc(obs_dt_str)
+            observed_at_utc = kst_naive_to_utc_iso(obs_dt_str)
 
             for api_field, metric in _METRIC_FIELDS:
                 rows.append({
@@ -112,17 +113,6 @@ class TideProcessorAdapter:
 # ── 헬퍼 ────────────────────────────────────────────────────────────────────
 
 
-def _kst_to_utc(dt_str: str) -> str:
-    """obsrvnDt KST naive → UTC (-9h). SOURCES.md: obsrvnDt는 KST naive 확인(I-2)"""
-    if not dt_str:
-        return ""
-    try:
-        dt_str = dt_str.strip().replace("T", " ")
-        dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-        utc = dt - timedelta(hours=9)
-        return utc.strftime("%Y-%m-%dT%H:%M:%S")
-    except ValueError:
-        return dt_str
 
 
 def _parse_value(raw_val, metric: str) -> tuple[float | None, str | None]:

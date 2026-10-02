@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from common.clock import kst_today
+
 # 축 → 어댑터 매핑 (판정 정의)
 AXIS_ADAPTER: dict[str, str] = {
     "water_temp": "tide",
@@ -100,7 +102,7 @@ def determine_state(
 
     # 2. OUT_OF_SEASON
     if coverage_row is not None:
-        if not _is_in_season(coverage_row.get("season_months"), ref_utc.month):
+        if not _is_in_season(coverage_row.get("season_months"), kst_today(ref_utc).month):
             return ("OUT_OF_SEASON", None, None)
 
     # 3. 원천·호출 문제

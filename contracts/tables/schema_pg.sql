@@ -32,7 +32,7 @@ CREATE TABLE axis_coverage (
 	covered BOOLEAN NOT NULL, 
 	season_months JSON, 
 	reason VARCHAR(255), 
-	CONSTRAINT ck_axis_coverage_axis CHECK (axis IN ('water_temp', 'salinity', 'tide_level', 'wind_speed', 'air_temp', 'red_tide', 'dissolved_oxygen', 'chlorophyll'))
+	CONSTRAINT ck_axis_coverage_axis CHECK (axis IN ('water_temp', 'salinity', 'tide_level', 'wind_speed', 'air_temp', 'red_tide', 'dissolved_oxygen', 'chlorophyll', 'red_tide_risk'))
 );
 
 CREATE TABLE axis_status (
@@ -42,7 +42,7 @@ CREATE TABLE axis_status (
 	reason VARCHAR(255), 
 	basis_utc TIMESTAMP WITHOUT TIME ZONE, 
 	last_checked_utc TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
-	CONSTRAINT ck_axis_status_axis CHECK (axis IN ('water_temp', 'salinity', 'tide_level', 'wind_speed', 'air_temp', 'red_tide', 'dissolved_oxygen', 'chlorophyll')), 
+	CONSTRAINT ck_axis_status_axis CHECK (axis IN ('water_temp', 'salinity', 'tide_level', 'wind_speed', 'air_temp', 'red_tide', 'dissolved_oxygen', 'chlorophyll', 'red_tide_risk')), 
 	CONSTRAINT ck_axis_status_state CHECK (state IN ('NORMAL', 'NORMAL_SILENCE', 'PUBLICATION_PENDING', 'NO_MATCH', 'ITEM_SUSPENDED', 'OUT_OF_COVERAGE', 'OUT_OF_SEASON', 'VALUE_FROZEN', 'STALE', 'SERVER_TIMEOUT', 'REQUEST_ERROR', 'PARSE_FAILURE', 'OUTAGE', 'FILTER_IGNORED', 'INTERPOLATION_STALE', 'GRADING_STALE', 'NOT_USABLE'))
 );
 
@@ -123,7 +123,7 @@ CREATE TABLE farm_reading_history (
 	distance_km DOUBLE PRECISION, 
 	observed_at_utc TIMESTAMP WITHOUT TIME ZONE, 
 	computed_at_utc TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
-	CONSTRAINT ck_farm_reading_history_axis CHECK (axis IN ('water_temp', 'salinity', 'tide_level', 'wind_speed', 'air_temp', 'red_tide', 'dissolved_oxygen', 'chlorophyll')), 
+	CONSTRAINT ck_farm_reading_history_axis CHECK (axis IN ('water_temp', 'salinity', 'tide_level', 'wind_speed', 'air_temp', 'red_tide', 'dissolved_oxygen', 'chlorophyll', 'red_tide_risk')), 
 	CONSTRAINT ck_farm_reading_history_derivation CHECK (derivation IN ('COMPUTED', 'MEASURED', 'OFFICIAL', 'SURVEY')), 
 	CONSTRAINT ck_farm_reading_history_provenance CHECK (provenance IN ('NONE', 'OBSERVED', 'NEAREST', 'BASELINE', 'INTERPOLATED', 'OFFICIAL', 'SURVEY')), 
 	CONSTRAINT ck_farm_reading_history_grade CHECK (grade IN ('NONE', 'PRE_ADVISORY', 'ADVISORY', 'WARNING', 'NOT_GRADED', 'UNKNOWN'))
@@ -146,7 +146,7 @@ CREATE TABLE farm_readings (
 	distance_km DOUBLE PRECISION, 
 	observed_at_utc TIMESTAMP WITHOUT TIME ZONE, 
 	computed_at_utc TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
-	CONSTRAINT ck_farm_readings_axis CHECK (axis IN ('water_temp', 'salinity', 'tide_level', 'wind_speed', 'air_temp', 'red_tide', 'dissolved_oxygen', 'chlorophyll')), 
+	CONSTRAINT ck_farm_readings_axis CHECK (axis IN ('water_temp', 'salinity', 'tide_level', 'wind_speed', 'air_temp', 'red_tide', 'dissolved_oxygen', 'chlorophyll', 'red_tide_risk')), 
 	CONSTRAINT ck_farm_readings_derivation CHECK (derivation IN ('COMPUTED', 'MEASURED', 'OFFICIAL', 'SURVEY')), 
 	CONSTRAINT ck_farm_readings_provenance CHECK (provenance IN ('NONE', 'OBSERVED', 'NEAREST', 'BASELINE', 'INTERPOLATED', 'OFFICIAL', 'SURVEY')), 
 	CONSTRAINT ck_farm_readings_grade CHECK (grade IN ('NONE', 'PRE_ADVISORY', 'ADVISORY', 'WARNING', 'NOT_GRADED', 'UNKNOWN'))
@@ -258,6 +258,41 @@ CREATE TABLE raw_index (
 	precheck_code VARCHAR(64), 
 	CONSTRAINT pk_raw_index PRIMARY KEY (id), 
 	CONSTRAINT uq_raw_index_storage_key UNIQUE (storage_key)
+);
+
+CREATE TABLE risk_index_factors (
+	farm_id VARCHAR(64) NOT NULL, 
+	factor VARCHAR(64) NOT NULL, 
+	input_axis VARCHAR(64) NOT NULL, 
+	input_value DOUBLE PRECISION, 
+	input_lower DOUBLE PRECISION, 
+	input_upper DOUBLE PRECISION, 
+	input_unit VARCHAR(64), 
+	input_grade VARCHAR(16), 
+	input_baseline DOUBLE PRECISION, 
+	score DOUBLE PRECISION, 
+	score_lower DOUBLE PRECISION, 
+	score_upper DOUBLE PRECISION, 
+	weight DOUBLE PRECISION NOT NULL, 
+	contribution DOUBLE PRECISION NOT NULL, 
+	ok BOOLEAN NOT NULL, 
+	excluded_reason VARCHAR(64), 
+	input_none_reason VARCHAR(64), 
+	source_ref VARCHAR(255), 
+	observed_at_utc TIMESTAMP WITHOUT TIME ZONE, 
+	computed_at_utc TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	CONSTRAINT ck_risk_index_factors_factor CHECK (factor IN ('nearby_bulletin', 'water_temp_band', 'salinity_band', 'chlorophyll_level')), 
+	CONSTRAINT ck_risk_index_factors_excluded_reason CHECK (excluded_reason IN ('NO_INPUT', 'INPUT_NONE', 'SENSOR_QUALITY', 'RULE_UNDECIDED'))
+);
+
+CREATE TABLE risk_index_levels (
+	farm_id VARCHAR(64) NOT NULL, 
+	level VARCHAR(64) NOT NULL, 
+	level_at_lower VARCHAR(64) NOT NULL, 
+	level_at_upper VARCHAR(64) NOT NULL, 
+	level_straddle BOOLEAN NOT NULL, 
+	computed_at_utc TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	CONSTRAINT pk_risk_index_levels PRIMARY KEY (farm_id)
 );
 
 CREATE TABLE stations (

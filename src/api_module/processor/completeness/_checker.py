@@ -5,8 +5,34 @@
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from urllib.parse import parse_qs, urlsplit
 
 from common.classifier import ParsedResponse
+
+
+def item_date(api: str, item: dict) -> str | None:
+    """요청 창 밖 행 검사용 원문 항목 날짜(KST, YYYYMMDD) — 적조 day_report, 정선 obs_dtm, 어장환경 DATE_Y/M/D.
+    못 읽으면 None — 판정에 쓰지 않는다. api 접미(`-watch` 등)는 떼고 본다"""
+    base = api.split("-", 1)[0]
+    try:
+        if base == "redtideList":
+            return str(item.get("day_report") or "")[:8] or None
+        if base == "sooList":
+            return str(item.get("obs_dtm") or "")[:10].replace("-", "") or None
+        if base == "femoSeaList":
+            return f"{int(item['DATE_Y']):04d}{int(item['DATE_M']):02d}{int(item['DATE_D']):02d}"
+    except (KeyError, TypeError, ValueError):
+        return None
+    return None
+
+
+def requested_window(meta: dict) -> tuple[str | None, str | None]:
+    """원문 메타의 요청 변수 sdate·edate (params, 없으면 url 쿼리)"""
+    params = (meta or {}).get("params") or {}
+    if "sdate" not in params and (meta or {}).get("url"):
+        q = parse_qs(urlsplit(meta["url"]).query)
+        params = {k: v[0] for k, v in q.items()}
+    return params.get("sdate"), params.get("edate")
 
 
 @dataclass
@@ -29,7 +55,7 @@ def check_completeness(
     totalCount 있는 API (dtRecent): 수령 건수 = totalCount
       - actual_items: rows가 metric 분해 등으로 items × N이 되는 어댑터는 pr.items 수를 전달한다
     totalCount 없는 API (NIFS): 분할 합산은 collector-completeness 별도 수행
-    필터 파라미터가 있는 API: 반환 행이 요청 창 안인지 확인
+    필터 파라미터가 있는 API: 원문 항목(pr.items)의 날짜가 요청 창(sdate~edate, 양끝 포함) 안인지 확인
     """
     # totalCount 비교 기준: 호출자가 actual_items를 주면 그것(items 단위), 없으면 rows 수
     actual = actual_items if actual_items is not None else len(rows)
@@ -47,8 +73,8 @@ def check_completeness(
     if request_window is not None:
         start, end = request_window
         out_of_window = [
-            r for r in rows
-            if r.get("date") and not (start <= str(r["date"]) <= end)
+            it for it in pr.items
+            if (d := item_date(api, it)) is not None and not (start <= d <= end)
         ]
         if out_of_window:
             return CompletenessResult(

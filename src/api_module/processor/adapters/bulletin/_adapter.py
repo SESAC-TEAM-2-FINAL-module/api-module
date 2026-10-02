@@ -8,16 +8,14 @@
 from __future__ import annotations
 import re
 import sys
-from pathlib import Path
 
 import yaml
 
 from common.classifier import ParsedResponse
 from common.config import load_definitions
+from common.seeds import load_area_aliases_dict as _load_area_aliases
 
 API_ID = "redtideList"
-
-_SEEDS_DIR = Path(__file__).parents[5] / "seeds"
 
 # 시도명 전체 → 약칭 (정규화 3단계)
 _SIDO_ABBREV: dict[str, str] = {
@@ -43,6 +41,10 @@ KIND_OUT_OF_SCOPE = "OUT_OF_SCOPE"
 
 class BulletinProcessorAdapter:
     api_id = API_ID
+
+    def configure(self, definitions: dict, operational: dict) -> None:
+        """기동 시 별칭 시드 검사 — 깨졌으면 processor가 기동하지 않는다"""
+        _load_area_aliases()
 
     def interpret(self, pr: ParsedResponse, raw_meta: dict) -> list[dict]:
         """outer items → bulletins + bulletin_details rows."""
@@ -208,26 +210,6 @@ def _split_txt_seas_4_5(key: str) -> list[str]:
             if part:
                 result.append(part)
     return result
-
-
-# ── 시드 로딩 ─────────────────────────────────────────────────────────────────
-
-def _load_area_aliases() -> dict[str, str]:
-    """area_aliases.yaml → {alias_key: area_id}. 내용 미결 시 빈 dict."""
-    path = _SEEDS_DIR / "area_aliases.yaml"
-    if not path.exists():
-        return {}
-    try:
-        data = yaml.safe_load(path.read_text("utf-8"))
-        if not data or "aliases" not in data:
-            return {}
-        return {
-            entry["alias_key"]: entry["area_id"]
-            for entry in (data["aliases"] or [])
-            if "alias_key" in entry and "area_id" in entry
-        }
-    except Exception:
-        return {}
 
 
 # ── 헬퍼 ─────────────────────────────────────────────────────────────────────
