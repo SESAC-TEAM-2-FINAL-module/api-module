@@ -17,7 +17,7 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 | `common/http/` | 공통 호출층 (③-1) |
 | `common/classifier/` | 형식 판별, 스키마 계열, 결과 코드 → 상태 (③-3) |
 | `common/raw_store/` | 객체 저장소 인터페이스 — collector가 쓰고 processor가 읽는다. collector는 **메타만** 읽을 수 있다(어장환경 게시 감시가 직전 감시 원문의 건수와 비교 — 2.1절) (③-5) |
-| `common/queue/` | 큐 인터페이스 + NATS·인메모리 구현, 단계 간 알림 스키마 검사 (③-6) |
+| `common/queue/` | 큐 인터페이스 + 인메모리 구현(NATS JetStream 구현은 개정 22), 단계 간 알림 스키마 검사 (③-6) |
 | `common/geo/` | 도분초 변환, 좌표 폐구간 검증, 거리 계산 (③-7) |
 | `common/farm_sites/` | 양식장 좌표 읽기 · 폐구간 검증 호출 (③-8) |
 | `common/contract_check/` | 기동 시 검사 — 테이블 존재·형태, 입력 단계 계약 버전, 운영 조정 스키마, 빈 해역 시드 (③-9) |
@@ -150,7 +150,7 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
   - `evaluation-sweep` — 알림이 끊긴 것 자체를 **침묵 판정**한다. 알림으로만 도는 구조에서는 "알림이 오지 않음"을 알아챌 단계가 따로 있어야 하기 때문이다
   - `interpolation-error` — 자기 산출물(오늘의 오차)만 하루 1회 만든다. 추정값(`interp.done`)을 대신 만들지 않으므로 추정이 멈추면 여전히 드러난다 *(제안 — 11절)*
 
-- 큐 구현(NATS / SQS)은 미결이다 — **`queue` 인터페이스 하나로 감싸고** 로컬 개발은 인메모리 구현을 쓴다
+- 큐는 **NATS JetStream으로 결정**(2026-10-06, 계획서 11절)됐지만 구현체·수신 대기·스트림 설계는 개정 22에서 한다 — 그때까지 **`queue` 인터페이스 하나로 감싸고** 로컬 개발·시험 실행기(`flowtest`, 2.1.1절)는 인메모리 구현을 쓴다
 - 메시지 스키마는 `contracts/queue/`에 두고 현재 버전은 `queue-v1`이다(7.7절 `contracts`)
 - **큐 `publish` 메시지 타입**: `Queue.publish(msg: Message)` — `Message(topic, payload)` 래퍼를 쓴다. `dict`를 직접 넘기지 않는다. 타입 계약을 내부 인터페이스에서도 강제해 타입 불일치를 조기에 잡는다 *(제안)*(2.2절)
 
@@ -220,7 +220,7 @@ v1.5 7.3절 규칙 중 이 모듈이 구현하는 것. R6(QC 플래그)은 폐�
 
 - **`collector/main.py`** — 워크로드 명령(`collector-tide`·`collector-bulletin`·`collector-line`·`collector-fishery-watch`·`collector-fishery-backfill`·`collector-completeness`)마다 등록된 원천 어댑터를 부른다. 매니페스트는 접두 없는 이름(`tide`·`bulletin`·`line`·`fishery-backfill`·`completeness`, 감시는 `python -m collector.fishery_watch`)을 넘긴다 — 진입점의 `WORKLOADS` 표가 워크로드 → 어댑터 api_id를 정한다(`completeness`는 3개). 어댑터는 진입점이 import해 등록하고, 실행은 `collector.main` 모듈의 함수로 한다(`__main__` 레지스트리 분리 방지). **호출 실패도 원문(error 기록)으로 저장·발행한다**(2.3절) — 버리면 `adapter_health`가 장애를 볼 수 없다(개정 16). **판정하지 않는다** — 원문과 요청 메타데이터만 남기고 `raw.fetched`를 발행한다. 수집 범위를 정하는 사전 읽기(결과 코드 존재, `totalCount`, 어장환경 올해 창 건수 — 직전 감시 원문의 메타 건수와 비교해 전량 수집 여부)만 허용하고, 그 결과를 상태 판정·적재에 쓰지 않는다
 - **`processor/main.py`** — `process`: `raw.fetched` 소비 → 원문 읽기 → `classifier` → 원천 어댑터의 해석·정규화 → `completeness` → `quality` → 적재(`processor/_load.py` — `raw_index`·`ingest_runs`·관측·`stations`, I-12) → `adapter_health` 갱신(`processor/_health.py`) → `obs.loaded`. 적재와 헬스 갱신은 한 트랜잭션이고, 실패하면 알림을 내지 않는다. 받을 어댑터가 없는 api_id 중 설계 대기는 `PENDING_APIS`에 명시한다(개정 17 이후 비어 있다 — 분할 합산 원문은 `raw.fetched`로 오지 않는다). `reprocess`: 원문 ID(`raw_index.id`) 범위 `--raw-id-from`·`--raw-id-to`(양끝 포함)를 다시 처리한다(파서 수정 후 — 같은 파서 버전이면 아무것도 쓰지 않는다, 개정 15). 재처리할 때마다 `ingest_runs`에 행을 추가한다 — 고유 (`raw_id`, `parser_version`)이므로 같은 파서로 같은 원문을 다시 처리하면(중복 알림) 행이 늘지 않는다(5.3절)
-- 단계 전용 코드끼리 import하지 않는다 — 진입점이 원천 어댑터를 부르는 것은 같은 이미지 안의 등록이다
+- 단계 전용 코드끼리 import하지 않는다 — 진입점이 원천 어댑터를 부르는 것은 같은 이미지 안의 등록이다. 예외는 시험 실행기 `flowtest/`가 단계를 가져다 쓰는 것 하나다(계획서 2.1.1절) — 단계 코드는 `flowtest/`를 가져다 쓰지 않는다
 
 ### ③-13 운영 지표 (9절)
 
