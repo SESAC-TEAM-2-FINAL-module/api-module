@@ -27,3 +27,4 @@ fixtures/raw/C2_p0_c2_1790148160500.json,ee80516846fe1fe9177c6ef206ed2d9511e8a02
 fixtures/raw/C5_p4_2024_1790148238792.json,6d07bb2a5d95f2ab87ac62bcc04933b5179dda67f5edd6c773c085059e5c3172,스키마 계열-공단XML P4 2024. 기대: OK
 fixtures/raw/C5_p4_2025_1790148239887.json,77b28862594958d11821cffa54c977b1c49129778e91d6fa3e74deab4d325a38,스키마 계열-공단XML P4 2025. 기대: OK
 fixtures/synthetic/farms.csv,01bba95365c2a9896184ed1a0b85d8ce80a6a74b0d8852e9059081012b3b6944,합성 양식장 — area_id 포함 (A3 시드 테스트용)
+fixtures/raw/dtRecent_i17_DT_0014_1791252000000.json,d9482e6746b005fa0ee13494f022a9014def3704fd08b79de31d7c4353280ad8,I-17 FT7 실수집 dtRecent 원문(DT_0014, 2026-10-06) — 항목에 관측소 코드 없음 확인용

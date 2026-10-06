@@ -413,15 +413,20 @@ def run_gate(cfg_path: str) -> int:
     return _run_gate(cfg_path)
 
 
+def startup_checks(repo) -> None:
+    """기동 시 검사 — 테이블·컬럼, areas+axis_coverage 빈 시드 (2.0.3절, 개정 21). 없거나 다르면 멈춘다."""
+    from common.contract_check import check_seed_tables
+    repo.check_schema()
+    check_seed_tables(repo, ["areas", "axis_coverage"])
+
+
 def _repository():
     """DB 접근 계층 — DATABASE_URL로 만들고 기동 시 테이블 검사 (2.0.3절). 없거나 다르면 멈춘다"""
     from sqlalchemy import create_engine
     from common.config import database_url
     from common.repository import SqlRepository
-    from common.contract_check import check_seed_tables
     repo = SqlRepository(create_engine(database_url()))
-    repo.check_schema()
-    check_seed_tables(repo, ["areas", "axis_coverage"])
+    startup_checks(repo)
     return repo
 
 

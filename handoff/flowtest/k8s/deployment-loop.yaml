@@ -1,0 +1,61 @@
+# flowtest 반복 실행 — 원천별 주기로 계속 수집해 결과 테이블이 갱신되는 모습을 본다
+# 1대만 (Recreate): 두 대가 돌면 같은 원천을 두 번 수집·적재한다
+# job-once.yaml과 같은 DB에 동시에 돌리지 않는다. 멈춤: kubectl scale deploy flowtest-loop --replicas=0 -n <네임스페이스>
+# 호출량: 조위 하루 약 3,900회 + 적조 24회(시즌)·4회(시즌 밖) + 정선 1회 + 어장환경 주 1회
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flowtest-loop
+  namespace: <네임스페이스>
+  labels:
+    app: flowtest
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: flowtest
+      mode: loop
+  template:
+    metadata:
+      labels:
+        app: flowtest
+        mode: loop
+    spec:
+      terminationGracePeriodSeconds: 120   # 종료 신호 뒤 진행 중 처리를 끝내고 요약을 낸다
+      containers:
+        - name: flowtest
+          image: ryujaehee/aquasentinel-flowtest:2026-10-06
+          args: ["--mode", "collect", "--run", "loop"]
+          envFrom:
+            - secretRef:
+                name: flowtest-secrets
+          env:
+            - name: OPERATIONAL_CONFIG_PATH
+              value: /config/operational.yaml
+            - name: RAW_STORE_PATH
+              value: /data/raw
+            # 주기(초) — 7개 모두 필요, 하나라도 없으면 기동하지 않는다. 권장값
+            - {name: FT_TIDE_INTERVAL_SEC, value: "600"}
+            - {name: FT_BULLETIN_SEASON_INTERVAL_SEC, value: "3600"}      # 5~10월 (한국 시각 월)
+            - {name: FT_BULLETIN_OFFSEASON_INTERVAL_SEC, value: "21600"}  # 11~4월
+            - {name: FT_LINE_INTERVAL_SEC, value: "86400"}
+            - {name: FT_FISHERY_INTERVAL_SEC, value: "604800"}
+            - {name: FT_SWEEP_INTERVAL_SEC, value: "600"}
+            - {name: FT_ERROR_INTERVAL_SEC, value: "86400"}
+          volumeMounts:
+            - name: operational-config
+              mountPath: /config
+              readOnly: true
+            - name: raw
+              mountPath: /data/raw
+          resources:
+            requests: {cpu: "250m", memory: "512Mi"}
+            limits: {cpu: "1000m", memory: "1Gi"}
+      volumes:
+        - name: operational-config
+          configMap:
+            name: flowtest-operational
+        - name: raw
+          emptyDir: {}            # 원문을 남기려면 PVC로 바꾼다 (원문은 하루 수십 MB씩 쌓인다)

@@ -48,6 +48,11 @@ def register(adapter: ProcessorAdapter) -> None:
     _REGISTRY[adapter.api_id] = adapter
 
 
+def schema_checks(repo) -> None:
+    """읽기 전용 스키마 검사 — completeness_checks 포함 (5.3절). startup()과 시험 실행기 _preflight가 함께 부른다."""
+    repo.check_schema(include=("completeness_checks",))
+
+
 def startup(
     definitions: dict | None = None,
     operational: dict | None = None,
@@ -64,7 +69,7 @@ def startup(
         operational = load_operational()
     if repo is None:
         repo = _repository_from_env()
-    repo.check_schema(include=("completeness_checks",))   # 분할 합산 결과 표는 processor만 요구 (5.3절)
+    schema_checks(repo)   # 분할 합산 결과 표는 processor만 요구 (5.3절)
 
     for adapter in _REGISTRY.values():
         configure = getattr(adapter, "configure", None)
@@ -221,6 +226,16 @@ def completeness_check(payload: dict, now_utc: datetime | None = None):
     return run_completeness_check(payload, _CONFIG["repo"], now_utc)
 
 
+def seed_check(repo, defs: dict | None = None) -> list[str]:
+    """해역 시드 대조 — startup() 없이 DB 시드를 이미지 시드 파일과 비교 (4.3절, 개정 19).
+    repo는 check_schema()가 이미 통과한 것을 전제한다.
+    반환: 차이 줄 목록 (빈 목록 = 통과)"""
+    if defs is None:
+        defs = load_definitions()
+    from common.seeds import compare_seed_tables
+    return compare_seed_tables(repo, defs)
+
+
 def _load_adapters() -> None:
     """어댑터 패키지를 import해 register()가 돌게 한다"""
     import processor.adapters.tide  # noqa: F401
@@ -248,13 +263,11 @@ if __name__ == "__main__":
     if args.cmd == "seed-check":
         # startup()·_load_adapters() 없이 돈다 — 운영 조정 읽기 없음 (4.3절, 개정 19)
         from sqlalchemy import create_engine as _ce
-        from common.config import load_definitions as _ld, database_url as _dbu
+        from common.config import database_url as _dbu
         from common.repository.sql import SqlRepository as _SR
-        from common.seeds import compare_seed_tables as _cst
-        _engine = _ce(_dbu())
-        _repo = _SR(_engine)
-        _repo.check_schema()
-        _diffs = _cst(_repo, _ld())
+        _repo = _SR(_ce(_dbu()))
+        _repo.check_schema()   # seed-check도 스키마 검사 (4.3절)
+        _diffs = _m.seed_check(_repo)
         for _line in _diffs:
             print(_line)
         print(f"[seed-check] 차이 {len(_diffs)}건")

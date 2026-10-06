@@ -606,22 +606,28 @@ def _make_none_row(
 # 진입점
 # ─────────────────────────────────────────────────────────────────────────────
 
+def startup_checks(repo, defs: dict | None = None) -> dict:
+    """기동 시 검사 — 테이블·컬럼, 빈 해역 시드, 지수 파라미터 전제 (2.0.3·2.1절, L2: 원래 순서 복원).
+    defs가 None이면 내부에서 로드 (check_seed_tables 이후 — 원래 순서). defs를 반환한다."""
+    repo.check_schema()
+    from common.contract_check import check_seed_tables
+    check_seed_tables(repo, ["areas"])
+    if defs is None:
+        defs = load_definitions()
+    # K9: 값이 정해진 위험도 지수 파라미터만 검사 (<미결>이면 건너뜀)
+    violations = check_risk_index_params(defs)
+    if violations:
+        raise SystemExit("risk_index 파라미터 전제 위반 — 기동 멈춤:\n" + "\n".join(f"  {v}" for v in violations))
+    return defs
+
+
 def main(argv: list[str] | None = None) -> None:
     from sqlalchemy import create_engine
     from common.repository import SqlRepository
 
     engine = create_engine(database_url())
     repo = SqlRepository(engine)
-    repo.check_schema()
-    from common.contract_check import check_seed_tables
-    check_seed_tables(repo, ["areas"])
-
-    defs = load_definitions()
-
-    # K9: 값이 정해진 위험도 지수 파라미터만 검사 (<미결>이면 건너뜀)
-    violations = check_risk_index_params(defs)
-    if violations:
-        raise SystemExit("risk_index 파라미터 전제 위반 — 기동 멈춤:\n" + "\n".join(f"  {v}" for v in violations))
+    defs = startup_checks(repo)  # defs는 startup_checks 내부에서 로드 (원래 순서)
 
     from common.queue import MemoryQueue
 

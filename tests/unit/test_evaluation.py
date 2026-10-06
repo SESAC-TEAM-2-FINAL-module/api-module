@@ -528,3 +528,35 @@ def test_season_uses_kst_month(ref_utc, state_is_out):
         adapter_health_row=None, latest_ingest_result=None, pub_checks=[], stale_suspect_flags=None,
         stale_threshold_hours=72, ref_utc=datetime.fromisoformat(ref_utc))
     assert (state == "OUT_OF_SEASON") is state_is_out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 신선도 초과 판정의 basis — 같은 입력 행의 산출 시각 (I-17 실데이터 재생에서 발견, 4.9절·P12)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestStaleBasisSameClock:
+    def _det(self, reading, now):
+        return determine_state(
+            axis="dissolved_oxygen", farm_reading=reading, coverage_row=None,
+            adapter_health_row=_health(), latest_ingest_result=None, pub_checks=[],
+            stale_suspect_flags=None, stale_threshold_hours=_THRESHOLD_H, ref_utc=now,
+        )
+
+    def test_sweep_stale_overwrites_normal_of_same_reading(self):
+        """같은 입력 — NORMAL 뒤 sweep의 신선도 초과는 기록된다(P12)"""
+        computed = _NOW - timedelta(hours=1)
+        reading = _reading(observed_at_utc=_NOW - timedelta(hours=2), computed_at_utc=computed)
+        st1, _, b1 = self._det(reading, _NOW)
+        assert st1 == "NORMAL"
+        later = _NOW + timedelta(hours=_THRESHOLD_H)
+        st2, _, b2 = self._det(reading, later)
+        assert st2 == "STALE"
+        assert should_write_status(b2, later, {"basis_utc": b1, "last_checked_utc": _NOW})
+
+    def test_stale_of_newer_reading_overwrites_earlier_not_usable(self):
+        """먼저 쓰인 NOT_USABLE(입력 없음)을 뒤에 들어온 오래된 조사값의 STALE이 덮는다"""
+        first = _NOW - timedelta(minutes=10)
+        reading = _reading(observed_at_utc=_NOW - timedelta(days=300), computed_at_utc=_NOW)
+        st, _, b = self._det(reading, _NOW)
+        assert st == "STALE" and b == _NOW
+        assert should_write_status(b, _NOW, {"basis_utc": first, "last_checked_utc": first})

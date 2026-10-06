@@ -47,8 +47,11 @@ class TideProcessorAdapter:
         """items → (station_id, observed_at_utc, metric, _raw_value) 행"""
         rows: list[dict] = []
         raw_id = raw_meta.get("raw_id", "")
+        # 실제 dtRecent 응답 항목에는 관측소 코드가 없다(2026-10-06 실수집 확인) — 관측소당 한 번 호출하므로
+        # 그 원문의 요청 파라미터 obsCode가 관측소다. 항목에 코드가 있으면 그것을 먼저 쓴다
+        req_code = (raw_meta.get("params") or {}).get("obsCode") or ""
         for item in pr.items:
-            obs_code = item.get("obsCode") or item.get("obsCd") or ""
+            obs_code = item.get("obsCode") or item.get("obsCd") or req_code
             if not obs_code:
                 continue
             station_id = f"tide:{obs_code}"
@@ -88,14 +91,16 @@ class TideProcessorAdapter:
         return rows
 
 
-    def stations(self, pr: ParsedResponse) -> list[dict]:
+    def stations(self, pr: ParsedResponse, raw_meta: dict | None = None) -> list[dict]:
         """
         관측소 마스터 행 (5.3절, 결정 D5) — 원문의 좌표로. 경도 필드는 `lot`(1.2절, 오타 아님).
         좌표가 없거나 숫자가 아니면 그 관측소는 내지 않는다. active는 processor가 STATION_INACTIVE로 정한다
         """
         out: dict[str, dict] = {}
+        # 실제 응답 항목에는 관측소 코드가 없다 — interpret와 같이 요청 파라미터 obsCode로 (2026-10-06 실수집 확인)
+        req_code = ((raw_meta or {}).get("params") or {}).get("obsCode") or ""
         for item in pr.items:
-            code = item.get("obsCode") or item.get("obsCd") or ""
+            code = item.get("obsCode") or item.get("obsCd") or req_code
             if not code:
                 continue
             try:
@@ -104,7 +109,7 @@ class TideProcessorAdapter:
                 continue
             out[f"tide:{code}"] = {
                 "id": f"tide:{code}", "source_api": "tide",
-                "name": item.get("obsName") or item.get("obsPostName"),
+                "name": item.get("obsName") or item.get("obsPostName") or item.get("obsvtrNm"),
                 "lat": lat, "lng": lng, "sea_area": None, "active": True,
             }
         return list(out.values())

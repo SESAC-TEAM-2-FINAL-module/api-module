@@ -78,7 +78,7 @@ class FisheryProcessorAdapter:
                 })
         return rows
 
-    def stations(self, pr: ParsedResponse) -> list[dict]:
+    def stations(self, pr: ParsedResponse, raw_meta: dict | None = None) -> list[dict]:
         """관측소 마스터 행 (5.3절, 결정 D5) — 원문 도분초 좌표를 십진도로(폐구간 통과분만). name = FISHERY"""
         defs = load_definitions()
         lat_range = tuple(defs["geo"]["lat_range"])

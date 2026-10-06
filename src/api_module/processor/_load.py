@@ -172,7 +172,7 @@ def load(
             written.update(_load_observations(tx, b, raw_id, rows, dropped, now_utc))
 
         if hasattr(adapter, "stations") and body is not None:
-            written.update(_load_stations(tx, adapter.stations(pr), rows, dropped))
+            written.update(_load_stations(tx, adapter.stations(pr, meta), rows, dropped))
 
         if first_time:
             _update_health(tx, api, status, meta, now_utc)

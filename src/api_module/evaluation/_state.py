@@ -127,7 +127,7 @@ def determine_state(
             if last_ok is not None:
                 elapsed = (ref_utc - last_ok).total_seconds() / 3600
                 if elapsed > stale_threshold_hours:
-                    return ("STALE", None, last_ok)
+                    return ("STALE", None, basis)
         if farm_reading.get("value") is None:
             return ("NORMAL_SILENCE", None, basis)
         return ("NORMAL", None, basis)
@@ -137,7 +137,9 @@ def determine_state(
     if obs_at is not None and stale_threshold_hours is not None:
         elapsed = (ref_utc - obs_at).total_seconds() / 3600
         if elapsed > stale_threshold_hours:
-            return ("STALE", None, obs_at)
+            # basis는 판정에 쓴 입력 행(farm_readings)의 산출 시각 — 다른 상태와 같은 시계여야
+            # 같은 입력에 대한 신선도 초과 판정이 기존 NORMAL·NOT_USABLE을 덮는다(4.9절 쓰기 규칙, P12)
+            return ("STALE", None, basis)
 
     # 7. VALUE_FROZEN
     if _has_stale_suspect(stale_suspect_flags):

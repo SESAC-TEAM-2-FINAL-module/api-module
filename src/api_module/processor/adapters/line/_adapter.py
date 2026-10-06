@@ -131,7 +131,7 @@ class LineProcessorAdapter:
 
         return rows
 
-    def stations(self, pr: ParsedResponse) -> list[dict]:
+    def stations(self, pr: ParsedResponse, raw_meta: dict | None = None) -> list[dict]:
         """관측소 마스터 행 (5.3절, 결정 D5) — 원문 십진도 좌표(폐구간 통과분만). sea_area = gru_nam"""
         defs = load_definitions()
         lat_range = tuple(defs["geo"]["lat_range"])

@@ -253,13 +253,18 @@ def run_interpolation_error(repo, defs: dict) -> None:
 # 진입점
 # ─────────────────────────────────────────────────────────────────────────────
 
+def startup_checks(repo) -> None:
+    """기동 시 검사 — 테이블·컬럼 검사 (2.0.3절). 없거나 다르면 멈춘다."""
+    repo.check_schema()
+
+
 def main(argv: list[str] | None = None) -> None:
     from sqlalchemy import create_engine
     from common.repository import SqlRepository
 
     engine = create_engine(database_url())
     repo = SqlRepository(engine)
-    repo.check_schema()
+    startup_checks(repo)
 
     defs = load_definitions()
 

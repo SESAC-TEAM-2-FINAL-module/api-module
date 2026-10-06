@@ -431,3 +431,63 @@ def test_normalize_requires_configure():
 def test_configure_requires_flatline_minutes():
     with pytest.raises(SystemExit):
         TideProcessorAdapter().configure({}, {"tide": {}})
+
+
+# ── 실제 응답 형태 — 항목에 관측소 코드 없음 (I-17 FT7, 2026-10-06) ─────────────
+
+def test_interpret_uses_request_obs_code_when_item_has_none():
+    """실제 dtRecent 항목에는 obsCode가 없다 — 그 원문의 요청 파라미터 obsCode가 관측소"""
+    pr = ParsedResponse(format="json", result_code="00", total_count=1,
+                        items=[{"obsrvnDt": "2026-01-01 09:00", "wtem": 20.0}],
+                        parse_status="OK")
+    rows = _ADAPTER.interpret(pr, {"raw_id": "r1", "params": {"obsCode": "DT_0014"}})
+    assert len(rows) == 6
+    assert all(r["station_id"] == "tide:DT_0014" for r in rows)
+
+
+def test_interpret_item_obs_code_takes_precedence():
+    pr = ParsedResponse(format="json", result_code="00", total_count=1,
+                        items=[_item(obs_code="DT_0049")], parse_status="OK")
+    rows = _ADAPTER.interpret(pr, {"params": {"obsCode": "DT_0014"}})
+    assert all(r["station_id"] == "tide:DT_0049" for r in rows)
+
+
+def test_interpret_live_raw_fixture_yields_rows():
+    """I-17 실수집 원문(DT_0014) — 항목 300개가 전부 행이 된다(수정 전에는 0행)"""
+    import json
+    from pathlib import Path
+    from common.classifier import parse
+    raw = json.loads((Path(__file__).parents[2] / "fixtures/raw/dtRecent_i17_DT_0014_1791252000000.json")
+                     .read_text(encoding="utf-8"))
+    pr = parse(raw["body"])
+    meta = {k: v for k, v in raw.items() if k != "body"}
+    rows = _ADAPTER.interpret(pr, {**meta, "raw_id": "r1"})
+    assert len(pr.items) == 300
+    assert len(rows) == 300 * 6
+    assert {r["station_id"] for r in rows} == {"tide:DT_0014"}
+    assert all(r["observed_at_utc"] for r in rows)
+
+
+def test_parse_top_level_header_with_items_item():
+    """헤더 최상위 계열의 body.items.item(3.2절 표) — dtRecent 실응답 형태"""
+    import json
+    from common.classifier import parse
+    body = json.dumps({"header": {"resultCode": "00", "resultMsg": "NORMAL_SERVICE"},
+                       "body": {"items": {"item": [{"obsrvnDt": "2026-10-06 10:50", "wtem": 24.3}]},
+                                "pageNo": 1, "numOfRows": 300, "totalCount": 1}})
+    pr = parse(body)
+    assert pr.parse_status == "OK" and len(pr.items) == 1
+
+
+def test_stations_live_raw_fixture_uses_request_obs_code():
+    """관측소 마스터도 요청 파라미터 obsCode로 — 좌표는 원문 lat·lot (5.3절 D5)"""
+    import json
+    from pathlib import Path
+    from common.classifier import parse
+    raw = json.loads((Path(__file__).parents[2] / "fixtures/raw/dtRecent_i17_DT_0014_1791252000000.json")
+                     .read_text(encoding="utf-8"))
+    meta = {k: v for k, v in raw.items() if k != "body"}
+    st = _ADAPTER.stations(parse(raw["body"]), meta)
+    assert [s["id"] for s in st] == ["tide:DT_0014"]
+    assert st[0]["lat"] and st[0]["lng"]
+    assert _ADAPTER.stations(parse(raw["body"])) == []      # 메타가 없으면 예전처럼 내지 않는다

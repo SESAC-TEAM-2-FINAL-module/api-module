@@ -167,7 +167,12 @@ def _parse_json(body: str) -> ParsedResponse:
         if body_d is not None and isinstance(body_d, dict):
             tc = body_d.get("totalCount")
             pr.total_count = int(tc) if tc is not None else None
-            pr.items = _to_list(body_d.get("item"))
+            # item 위치: body.item(NIFS) / body.items.item(헤더 최상위 data.go.kr — dtRecent 실응답) (3.2절 표)
+            raw_items = body_d.get("item")
+            if raw_items is None:
+                items_d = body_d.get("items")
+                raw_items = items_d.get("item") if isinstance(items_d, dict) else items_d
+            pr.items = _to_list(raw_items)
             if pr.total_count and pr.total_count > 0 and not pr.items:
                 pr.parse_status = "PARSE_FAILURE"
             elif pr.parse_status == "OK" and not pr.items:

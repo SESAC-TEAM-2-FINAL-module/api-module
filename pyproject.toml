@@ -36,6 +36,15 @@ evaluation = [
 grading = [
     "SQLAlchemy>=2.0",
 ]
+# flowtest: 전 단계 의존성 합집합 — collector·processor·interpolation·grading·evaluation (2.1.1절, 개정 21)
+flowtest = [
+    "SQLAlchemy>=2.0",
+    "httpx[http2]",
+    "lxml",
+    "jsonschema",
+    "numpy",
+    "scipy",
+]
 # collector: DB에 쓰지 않는다 (2.3절, 결정 D1) — SQLAlchemy 없음
 
 # DB 드라이버 — 계획서 5.4절 (하나만 설치)

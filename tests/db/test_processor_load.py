@@ -291,3 +291,21 @@ def test_unreadable_observation_time_rows_skipped_not_shifted(processor_up, raw_
     ev = [e for e in _select(schema_engine, "ops_events") if e["event_type"] == "LOAD_ROWS_SKIPPED"]
     assert len(ev) == 1 and ev[0]["detail"]["rows"] > 0
     assert [r["status"] for r in _select(schema_engine, "ingest_runs")] == ["OK"]
+
+
+def test_live_dtrecent_raw_loads_station_and_observations(processor_up, raw_store, schema_engine):
+    """I-17 실수집 dtRecent 원문(항목에 관측소 코드 없음) — 관측소 마스터·관측이 적재되고 obs.loaded에 시각이 실린다.
+    수정 전: body.items.item을 못 읽어 PARSE_FAILURE, 고친 뒤에도 관측소 코드가 없어 0행·관측소 없음"""
+    from sqlalchemy import text
+    from common.queue import MemoryQueue
+    pm, _repo = processor_up
+    key = raw_store.put_fixture("dtRecent", "DT_0014", "dtRecent_i17_DT_0014_*.json")
+    q = MemoryQueue()
+    pm.process(key, "dtRecent", q)
+    with schema_engine.connect() as c:
+        st = c.execute(text("SELECT id FROM stations WHERE source_api = 'tide'")).scalars().all()
+        n = c.execute(text("SELECT COUNT(*) FROM observations WHERE station_id = 'tide:DT_0014'")).scalar()
+    assert st == ["tide:DT_0014"]
+    assert n == 300 * 6
+    (msg,) = q.drain("obs.loaded")
+    assert msg.payload["observed_to_utc"] and msg.payload["station_ids"] == ["tide:DT_0014"]
