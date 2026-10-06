@@ -117,9 +117,9 @@ def _ddl(sa_dialect, header: list[str], table_suffix: str, out_path: Path) -> st
     for tbl in t.metadata.sorted_tables:
         ddl = str(CreateTable(tbl).compile(dialect=sa_dialect)).strip().rstrip(";")
         parts.append(ddl + table_suffix + ";")
-        for idx in tbl.indexes:
-            if not idx.unique:  # unique 인덱스는 CREATE TABLE에 포함됨
-                parts.append(str(CreateIndex(idx).compile(dialect=sa_dialect)).strip() + ";")
+        # CreateTable은 Index 객체를 내지 않는다 — 고유 인덱스(복합 키)도 여기서 낸다. 빠지면 upsert가 멈춘다
+        for idx in sorted(tbl.indexes, key=lambda i: i.name):
+            parts.append(str(CreateIndex(idx).compile(dialect=sa_dialect)).strip() + ";")
         parts.append("")
     sql = "\n".join(parts)
     out_path.parent.mkdir(parents=True, exist_ok=True)

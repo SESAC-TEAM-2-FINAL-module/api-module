@@ -615,7 +615,9 @@ class SqlRepository(AbstractRepository):
     def check_schema(self, include: tuple[str, ...] = ()) -> None:
         """
         tables.py 모델과 실제 DB 스키마를 비교한다.
-        테이블·컬럼이 없으면 SystemExit으로 기동을 멈추고 차이를 보고한다 (B4).
+        테이블·컬럼·고유 키가 없으면 SystemExit으로 기동을 멈추고 차이를 보고한다 (B4).
+        고유 키는 upsert 충돌 키라 없으면 첫 적재에서 멈춘다 — 이름과 무관하게 컬럼 조합으로
+        PK·고유 제약·고유 인덱스 중 하나가 있는지 본다.
         OPTIONAL_TABLES(쓰는 이미지만 요구하는 표)는 include에 있을 때만 검사한다 (5.3절)
         """
         insp = inspect(self._engine)
@@ -623,6 +625,7 @@ class SqlRepository(AbstractRepository):
 
         missing_tables: list[str] = []
         missing_cols: list[str] = []
+        missing_keys: list[str] = []
 
         for table_name, table_obj in t.metadata.tables.items():
             if table_name in t.OPTIONAL_TABLES and table_name not in include:
@@ -634,19 +637,39 @@ class SqlRepository(AbstractRepository):
             for col in table_obj.columns:
                 if col.name not in db_cols:
                     missing_cols.append(f"{table_name}.{col.name}")
+            db_keys = _db_unique_keys(insp, table_name)
+            for key in t.unique_keys(table_obj):
+                if frozenset(key) not in db_keys:
+                    missing_keys.append(f"{table_name}({', '.join(key)})")
 
-        if missing_tables or missing_cols:
+        if missing_tables or missing_cols or missing_keys:
             lines: list[str] = ["DB 스키마 불일치 — 기동 멈춤:"]
             if missing_tables:
                 lines.append(f"  없는 테이블: {', '.join(sorted(missing_tables))}")
             if missing_cols:
                 lines.append(f"  없는 컬럼: {', '.join(sorted(missing_cols))}")
+            if missing_keys:
+                lines.append(f"  없는 고유 키: {', '.join(sorted(missing_keys))}")
             raise SystemExit("\n".join(lines))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 내부 헬퍼
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _db_unique_keys(insp, table_name: str) -> set[frozenset]:
+    """DB에 있는 고유 키의 컬럼 조합 — PK·고유 제약·고유 인덱스 (이름 무관)"""
+    keys: set[frozenset] = set()
+    pk = insp.get_pk_constraint(table_name).get("constrained_columns") or []
+    if pk:
+        keys.add(frozenset(pk))
+    for uc in insp.get_unique_constraints(table_name):
+        keys.add(frozenset(uc["column_names"]))
+    for ix in insp.get_indexes(table_name):
+        if ix.get("unique"):
+            keys.add(frozenset(c for c in ix["column_names"] if c))
+    return keys
+
 
 def _prep(row: dict) -> dict:
     """datetime 값을 초 단위 절삭해 반환한다. 원본 dict는 수정하지 않는다."""

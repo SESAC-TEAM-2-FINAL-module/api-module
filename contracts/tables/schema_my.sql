@@ -39,6 +39,7 @@ CREATE TABLE axis_coverage (
 	CONSTRAINT ck_axis_coverage_axis CHECK (axis IN ('water_temp', 'salinity', 'tide_level', 'wind_speed', 'air_temp', 'red_tide', 'dissolved_oxygen', 'chlorophyll', 'red_tide_risk'))
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_axis_coverage ON axis_coverage (area_id, axis);
 
 CREATE TABLE axis_status (
 	farm_id VARCHAR(64) NOT NULL, 
@@ -51,6 +52,7 @@ CREATE TABLE axis_status (
 	CONSTRAINT ck_axis_status_state CHECK (state IN ('NORMAL', 'NORMAL_SILENCE', 'PUBLICATION_PENDING', 'NO_MATCH', 'ITEM_SUSPENDED', 'OUT_OF_COVERAGE', 'OUT_OF_SEASON', 'VALUE_FROZEN', 'STALE', 'SERVER_TIMEOUT', 'REQUEST_ERROR', 'PARSE_FAILURE', 'OUTAGE', 'FILTER_IGNORED', 'INTERPOLATION_STALE', 'GRADING_STALE', 'NOT_USABLE'))
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_axis_status ON axis_status (farm_id, axis);
 
 CREATE TABLE bulletin_detail_areas (
 	cod_news VARCHAR(64) NOT NULL, 
@@ -60,6 +62,7 @@ CREATE TABLE bulletin_detail_areas (
 	area_id VARCHAR(64)
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_bda ON bulletin_detail_areas (cod_news, seq, part_no);
 
 CREATE TABLE bulletin_details (
 	cod_news VARCHAR(64) NOT NULL, 
@@ -75,6 +78,7 @@ CREATE TABLE bulletin_details (
 	CONSTRAINT ck_bulletin_details_grade CHECK (grade IN ('NONE', 'PRE_ADVISORY', 'ADVISORY', 'WARNING', 'NOT_GRADED', 'UNKNOWN'))
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_bulletin_details ON bulletin_details (cod_news, seq);
 
 CREATE TABLE bulletins (
 	cod_news VARCHAR(64) NOT NULL, 
@@ -140,6 +144,7 @@ CREATE TABLE farm_reading_history (
 	CONSTRAINT ck_farm_reading_history_grade CHECK (grade IN ('NONE', 'PRE_ADVISORY', 'ADVISORY', 'WARNING', 'NOT_GRADED', 'UNKNOWN'))
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_farm_reading_history ON farm_reading_history (farm_id, axis, ts_utc);
 
 CREATE TABLE farm_readings (
 	farm_id VARCHAR(64) NOT NULL, 
@@ -164,6 +169,7 @@ CREATE TABLE farm_readings (
 	CONSTRAINT ck_farm_readings_grade CHECK (grade IN ('NONE', 'PRE_ADVISORY', 'ADVISORY', 'WARNING', 'NOT_GRADED', 'UNKNOWN'))
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_farm_readings ON farm_readings (farm_id, axis);
 
 CREATE TABLE ingest_runs (
 	id BIGINT NOT NULL AUTO_INCREMENT, 
@@ -191,6 +197,7 @@ CREATE TABLE interpolation_error (
 	computed_on DATE NOT NULL
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_interp_error ON interpolation_error (station_set_key, metric, window_days, computed_on);
 
 CREATE TABLE interpolation_runs (
 	run_id VARCHAR(64) NOT NULL, 
@@ -217,6 +224,7 @@ CREATE TABLE interpolation_weights (
 	weight DOUBLE
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_interp_weights ON interpolation_weights (run_id, farm_id, station_id);
 
 CREATE TABLE line_observations (
 	station_id VARCHAR(64) NOT NULL, 
@@ -232,6 +240,7 @@ CREATE TABLE line_observations (
 	raw_id BIGINT
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_line_obs ON line_observations (station_id, observed_at_utc, depth_m, metric);
 
 CREATE TABLE observations (
 	station_id VARCHAR(64) NOT NULL, 
@@ -243,6 +252,7 @@ CREATE TABLE observations (
 	raw_id BIGINT
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_observations ON observations (station_id, observed_at_utc, metric);
 
 CREATE TABLE ops_events (
 	id BIGINT NOT NULL AUTO_INCREMENT, 
@@ -307,6 +317,7 @@ CREATE TABLE risk_index_factors (
 	CONSTRAINT ck_risk_index_factors_excluded_reason CHECK (excluded_reason IN ('NO_INPUT', 'INPUT_NONE', 'SENSOR_QUALITY', 'RULE_UNDECIDED'))
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_risk_index_factors ON risk_index_factors (farm_id, factor);
 
 CREATE TABLE risk_index_levels (
 	farm_id VARCHAR(64) NOT NULL, 
@@ -345,6 +356,7 @@ CREATE TABLE survey_observations (
 	CONSTRAINT ck_survey_observations_layer CHECK (layer IN ('S', 'B'))
 )
 CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE UNIQUE INDEX pk_survey_obs ON survey_observations (station_id, observed_at_utc, layer, metric);
 
 CREATE TABLE unmapped_locations (
 	area_key VARCHAR(255) NOT NULL, 

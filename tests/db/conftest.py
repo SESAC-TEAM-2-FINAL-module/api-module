@@ -59,14 +59,35 @@ def pg_engine() -> Engine:
         engine.dispose()
 
 
+_SCHEMA_PG = Path(__file__).parents[2] / "contracts" / "tables" / "schema_pg.sql"
+
+
+def apply_generated_ddl(engine: Engine) -> None:
+    """
+    커밋된 생성본 DDL(contracts/tables/schema_pg.sql)을 그대로 적용한다.
+    모델 create_all이 아니라 DB 소유 측이 받는 파일로 스키마를 만든다 — DDL 검증을 겸한다 (repository skill, 7.4절)
+    """
+    sql = _SCHEMA_PG.read_text("utf-8")
+    with engine.begin() as conn:
+        for part in sql.split(";"):
+            stmt = "\n".join(
+                ln for ln in part.splitlines() if not ln.lstrip().startswith("--")
+            ).strip()
+            if stmt:
+                conn.exec_driver_sql(stmt)
+
+
+@pytest.fixture()
+def apply_ddl():
+    """생성본 DDL 적용 함수 — 별도 스키마(search_path)에 같은 파일로 스키마를 만들 때"""
+    return apply_generated_ddl
+
+
 @pytest.fixture(scope="session")
 def schema_engine(pg_engine: Engine) -> Engine:
-    """
-    tables.py 메타데이터를 적용한 엔진.
-    DDL 적용은 모델 기반 create_all — 생성본 DDL 파일 검증은 별도 테스트.
-    """
+    """생성본 DDL을 적용한 엔진 (apply_generated_ddl)."""
     from common.repository.tables import metadata
-    metadata.create_all(pg_engine)
+    apply_generated_ddl(pg_engine)
     yield pg_engine
     # 정리: 모든 테이블 삭제 (세션 종료 시)
     metadata.drop_all(pg_engine)

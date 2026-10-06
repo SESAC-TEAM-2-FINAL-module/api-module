@@ -307,6 +307,23 @@ completeness_checks = Table(
 # 기동 시 테이블 검사에서 쓰는 이미지만 요구하는 표 (5.3절) — processor만
 OPTIONAL_TABLES = frozenset({"completeness_checks"})
 
+
+def unique_keys(tbl: Table) -> list[tuple[str, ...]]:
+    """
+    표의 고유 키 컬럼 조합 — PK·고유 제약·고유 인덱스. upsert 충돌 키(= 멱등 키)의 기준이다 (5.3절).
+    DDL 생성본·기동 시 키 검사·upsert 키 정적 검사가 모두 이 목록을 본다
+    """
+    keys: list[tuple[str, ...]] = []
+    if tbl.primary_key.columns:
+        keys.append(tuple(c.name for c in tbl.primary_key.columns))
+    for con in tbl.constraints:
+        if isinstance(con, UniqueConstraint):
+            keys.append(tuple(c.name for c in con.columns))
+    for idx in tbl.indexes:
+        if idx.unique:
+            keys.append(tuple(c.name for c in idx.columns))
+    return keys
+
 ops_events = Table(
     "ops_events", metadata,
     Column("id", BigInteger, Identity(always=False), primary_key=True),

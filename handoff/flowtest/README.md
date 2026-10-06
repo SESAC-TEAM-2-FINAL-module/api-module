@@ -157,7 +157,7 @@ docker run --rm --env-file flowtest.env -e OPERATIONAL_CONFIG_PATH=/config/opera
 
 | 메시지 | 확인할 것 |
 |---|---|
-| DB 스키마 불일치 | 1절 1번 DDL 적용 여부·버전 |
+| DB 스키마 불일치 | 1절 1번 DDL 적용 여부·버전. "없는 고유 키"가 나오면 그 표의 고유 인덱스(`CREATE UNIQUE INDEX`)가 빠진 것 — 현재 판 DDL로 다시 적용 |
 | 해역 시드 표가 비었다 / seed-check 차이 | 1절 2번 시드 SQL 적용 여부·버전 |
 | farm_sites 표 없음 / 활성 행 없음 | 1절 3번 |
 | 운영 조정 파일 없음 / 스키마 위반 | 마운트 경로와 `OPERATIONAL_CONFIG_PATH` |
