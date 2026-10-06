@@ -1,6 +1,6 @@
 ---
 name: tide
-description: "조위관측소 최신관측(dtRecent) 수집·가공 어댑터 — src/api_module/collector/adapters/tide/ 와 processor/adapters/tide/ 를 만들거나 고칠 때 쓴다 (지시서 I-2). 9개 관측소 전 페이지 수령, 6개 metric 정규화, 0.000 결측, 경도 필드 lot, 값 멈춤 플래그(STALE_SUSPECT), 관측소 미가동(STATION_INACTIVE). 응답 해석·완전성 비교·품질 규칙 구현(common-core), IDW(interpolation) 작업에는 쓰지 않는다."
+description: "조위관측소 최신관측(dtRecent) 수집·가공 어댑터 — src/api_module/collector/adapters/tide/ 와 processor/adapters/tide/ 를 만들거나 고칠 때 쓴다 (지시서 I-2). 9개 관측소 한 페이지 수령(`min=5`·자정 경계 — 개정 22), 6개 metric 정규화, 0.000 결측, 경도 필드 lot, 값 멈춤 플래그(STALE_SUSPECT), 관측소 미가동(STATION_INACTIVE). 응답 해석·완전성 비교·품질 규칙 구현(common-core), IDW(interpolation) 작업에는 쓰지 않는다."
 ---
 
 # tide
@@ -13,7 +13,7 @@ description: "조위관측소 최신관측(dtRecent) 수집·가공 어댑터 �
 
 | 경로 | 이 skill이 만드는 것 |
 | --- | --- |
-| `collector/adapters/tide/` | 9개 관측소 호출, **`totalCount`까지 전 페이지 수령**, 원문 저장 요청. `collector/main.py`의 `collector-tide` 명령에 **등록** |
+| `collector/adapters/tide/` | 9개 관측소 호출 — **관측소마다 1회, 한 페이지**(`reqDate` KST 오늘·`min=5`·`numOfRows=300`, KST `[00:00, 00:30)` 시작이면 어제분 1회 더 — 계획서 1.2절, 개정 22), 응답 그대로 원문 저장 요청(페이지를 넘기거나 합치지 않는다 — 2.3절). `collector/main.py`의 `collector-tide` 명령에 **등록** |
 | `processor/adapters/tide/` | 해석된 응답(`common/classifier` 결과) → `observations` 행 정규화, `0.000` 결측, 값 멈춤 플래그, 관측소 미가동 판정. `processor/main.py`에 **등록** |
 
 **만들지 않는 것**
@@ -49,7 +49,7 @@ description: "조위관측소 최신관측(dtRecent) 수집·가공 어댑터 �
 | 좌표 | 경도 필드명이 **`lot`** (오타 아님) |
 | 결측 | **`0.000`** = 결측 (R0). 수온·염분·pH에 적용 |
 | 스키마 | `response.header` / `OpenAPI_ServiceResponse.cmmMsgHeader` / **최상위 `header`** 가능 — 3종 모두 처리 |
-| 함정 | 마지막 페이지의 마지막 시각 그룹이 잘리면 "관측소 동시 무응답"처럼 보인다 → **수령 건수 = `totalCount`까지**. `totalCount`는 **관측 시점 수**다 — metric 분해 후 행 수와 다르다(3.3절) |
+| 함정 | 마지막 시각 그룹이 잘리면 "관측소 동시 무응답"처럼 보인다 → **수령 건수 = `totalCount`** — 한 페이지에서도 대조한다. `totalCount`는 **관측 시점 수**다 — metric 분해 후 행 수와 다르다(3.3절) |
 
 - 키는 data.go.kr 일반 인증키 **Decoding 값을 `params=`로** 넘긴다. URL 문자열에 키를 조립하지 않는다(Encoding/Decoding 혼용 위험 — ④ 사용 금지)
 - 관측소 목록은 판정 정의 **`tide.stations`**(`config/definitions.yaml`)에서 읽는다. 현재 값: `[DT_0014, DT_0016, DT_0029, DT_0061, DT_0026, DT_0062, DT_0063, DT_0049, DT_0092]`. 코드에 박지 않는다
@@ -58,8 +58,11 @@ description: "조위관측소 최신관측(dtRecent) 수집·가공 어댑터 �
 ### ③-2 수집 (2.1·8절)
 
 - 워크로드 `collector-tide` — CronJob 10분(워크로드 설정, `HANDOFF.md` 권장값). `dtRecent` 9개소 → 원문 → `raw.fetched`
-- 호출 예산: 회당 9(+페이지), 하루 약 1,300. data.go.kr 개발계정 한도는 **실측 전**이다 — 한도 초과 코드 `22`는 `QUOTA`로 분리 기록된다(`common-core`)
-- collector는 **판정하지 않는다.** 전 페이지를 받기 위해 첫 응답의 `totalCount`를 **사전 읽기로만** 쓴다. 그 값을 상태 판정·적재에 쓰지 않는다 — 수령 건수 대조는 processor가 원문으로 다시 한다
+- **요청 규칙 (계획서 1.2절, 개정 22)**: 명세상 `numOfRows` 최댓값 300, `reqDate`(요청일자 `YYYYMMDD`, 기본 오늘) — 응답은 **그날 00:00(KST)부터 최신순**(I-17 실측 `totalCount` 651 @ 10:50, I-18 T4로 확인), `min`(출력 간격 분, 1~60). `min=5`면 하루 최대 288건이라 늘 한 페이지다. 매 실행이 그날 전체를 다시 받으므로 하루 안의 수집 공백은 다음 실행이 메우고, 겹친 관측은 upsert 키로 한 행이다
+- **자정 경계**: 실행 시작 시각(KST, 실행마다 한 번)이 `[00:00, 00:30)`이면 관측소마다 `reqDate` = KST 어제를 1회 더 받는다 — tag `{관측소}_y` *(제안 — 날짜를 붙이면 `load_id`가 `VARCHAR(64)`를 넘는다)*. processor는 tag가 아니라 원문 메타의 요청 변수(`obsCode`·`reqDate`)를 쓴다. **어제분은 보충 원문** — 관측·색인까지만 적재하고 `obs.loaded`를 내지 않으며 `adapter_health`를 갱신하지 않는다(늦게 처리된 어제 값이 오늘 현재값을 덮지 않게). 판별: **tag가 `_y`로 끝남**(날짜 비교는 자정 언저리 호출에서 틀릴 수 있다). 정기 호출의 `reqDate`는 **호출 직전의 KST 날짜**(실행 시작 시각이 아니다). `load_id` 길이 상한(64)은 `interpolation_runs`에 들어가는 조위 원문만 본다
+- **응답 형태(I-17 실측)**: 최상위 `header` + `body.items.item`, 항목에 관측소 코드가 없다 — 관측소는 요청 변수 `obsCode`로 안다
+- 호출 예산: 회당 9(자정 경계 3회는 +9), 하루 약 1,320. data.go.kr 일일 한도 **10,000**(2026-10-06 확인) — 한도 초과 코드 `22`는 `QUOTA`로 분리 기록된다(`common-core`)
+- collector는 **판정하지 않는다.** 페이지를 넘기지 않으므로 `totalCount`를 사전 읽기할 일도 없다 — 수령 건수 대조는 processor가 원문으로 한다(3.3절)
 - 실패한 호출을 다른 창·파라미터로 자동 대체하지 않는다. 재시도는 `05`에만 1회(`common-core`)
 
 ### ③-3 정규화 (4.1절)
@@ -109,7 +112,7 @@ description: "조위관측소 최신관측(dtRecent) 수집·가공 어댑터 �
 
 | 새 경로 | 검증 코드 위치 | 처리 | 이식 시 반드시 바꿀 것 |
 | --- | --- | --- | --- |
-| `collector/adapters/tide/` (페이지 넘김) | `$SRC_IDW/stage2_collect.py` `_fetch_all_pages()` | **이식** | `totalCount`까지 수령. 마지막 페이지 절단 함정. `totalCount`는 사전 읽기로만 |
+| `collector/adapters/tide/` (~~페이지 넘김~~) | `$SRC_IDW/stage2_collect.py` `_fetch_all_pages()` | ~~이식~~ → **개정 22에서 제거** | 한 페이지(`min=5`)로 바뀌어 페이지 넘김·합치기를 쓰지 않는다 |
 | `collector/adapters/tide/` · `processor/adapters/tide/` | `$SRC_IDW/stage2_collect.py` (dtRecent 수집·페이징) | **이식** | 조위·풍속·기온 필드 추가. `0.000` 결측 처리 위치는 I-2에서 확인 |
 | | `$SRC_IDW/stage1_verify.py` (dtRecent 응답 검증) | 참고 | 스키마 3종 검증 항목 |
 | | `$SRC_IDW/stage2_collect.py` `parse_resp()` | 참고 | data.go.kr `dtRecent` 계열(최상위 `header` 포함). 해석 자체는 `common-core`의 `classifier` |
@@ -125,7 +128,8 @@ description: "조위관측소 최신관측(dtRecent) 수집·가공 어댑터 �
 
 - **경도 필드 이름이 `lot`다.** 오타가 아니다. `lon`·`lng`로 바꿔 찾으면 좌표가 빈다
 - **`0.000`은 결측이다**(수온·염분·pH). 값 0으로 저장하지도, 행을 버리지도 않는다 — `value = NULL`, `missing_reason = 'ZERO_SENTINEL'`
-- **마지막 페이지의 마지막 시각 그룹이 잘리면 "관측소 동시 무응답"처럼 보인다.** 수령 건수가 `totalCount`에 닿을 때까지 받는다
+- **마지막 시각 그룹이 잘리면 "관측소 동시 무응답"처럼 보인다.** 수령 건수 = `totalCount` 대조로 드러낸다(processor)
+- **여러 페이지를 합쳐 원문을 만들지 않는다**(점검 C2 — 합친 JSON에 `resultCode "00"`을 박아 뒤 페이지 실패가 `OK`로 남았다. 개정 22에서 삭제)
 - **응답 스키마가 세 가지다** — `response.header` / `OpenAPI_ServiceResponse.cmmMsgHeader` / 최상위 `header`. 판별은 `common-core`가 하지만, 어댑터가 한 계열만 가정하면 나머지 둘에서 조용히 빈 결과가 된다
 - **값 멈춤은 신선도와 다르다.** `stale_threshold`(새 값이 **안 들어오는** 시간)를 N분으로 가져다 쓰지 않는다. 값 멈춤은 새 값이 들어오는데 **같은 값**인 것이다
 - **잔잔한 시기에는 정상 관측소도 같은 값이 이어진다.** 그래서 값 멈춤은 판정이 아니라 플래그다

@@ -74,6 +74,8 @@ description: "출처 등급·발송 자격 — src/api_module/grading/(큐 컨�
 - DO: 빈 값 레코드는 건너뛰고 마지막 유효값과 그 날짜를 쓴다. v1.5 4.7절은 인근 정점이 **2025-11 이후 DO 값이 비어 있다**고 적었으나, 빈 값 레코드 739행은 수온·염분·DO가 **모두** 빈 레코드라 "0m에서 DO만 빈 경우"는 따로 세지 않았다. **0m DO의 날짜별 유효 여부는 미확인** — I-4에서 B v2 원문으로 센다(4.9절 DO 신선도 임계의 선행 조건)
 - **`source_ref` 형식** — "근거 보기"가 원천 행을 찾아가는 키. 축마다 고정한다: 수온 = `run_id` / 물때·풍속·기온·염분 = `station_id` / DO·클로로필 = `station_id@observed_at_utc`(조사·관측 시각, UTC ISO — 개정 14. 같은 날 여러 조사를 구분한다) / 적조 = `cod_news#seq`. `station_id`에 이미 `:`가 있어(`tide:DT_0016`) 구분자를 따로 둔다
 - 인근 실측 축은 `obs.loaded`로, 수온은 `interp.done`으로 갱신한다. **두 경로는 서로 기다리지 않는다**
+- **`interp.done.error_p95`는 널일 수 있다**(계약 `queue-v2`, 개정 22 — 오늘의 오차가 없는 관측소 집합). 널이면 수온 행은 `lower`·`upper` 없음, `provenance = NONE`, `none_reason = NO_INPUT`(현재 구현과 같음), **값은 저장한다**. 오차를 지어내지 않는다
+- **`grade_run_id`는 입력 메시지 키에서 결정적으로 만든다**(개정 22) — UUID v5(이름 = 입력 주제+입력 키 — `obs.loaded`면 `load_id`, `interp.done`이면 `run_id`) *(제안)*. 재전달 때 같은 `grade.done`(축마다 하나, `Nats-Msg-Id` = `grade.done:{grade_run_id}+{axis}`)이 나오게. `farm_reading_history`는 `ts_utc`가 처리 시각이라 재처리마다 이력 행이 하나 늘 수 있다 — 허용(계획서 7.11 J2)
 - 출력: `farm_readings`(5.3절) → `grade.done`
 
 ### ③-2 좌표 불량 양식장 (1.6절)
@@ -127,7 +129,7 @@ grading.excluded_zones:                  # 제외 구역 — 중심·반경 목�
 
 v1.5 7.4절 설계 B(가중 합산 지수)를 이 모듈 범위에 넣는다(2026-10-02 팀 결정). **판정·값은 모듈, 표시는 대시보드** — 대시보드는 지수·단계를 다시 계산하지 않는다(5.5절). v1.5 7.5절에 따라 **정확도(적조 발생 예측력)는 평가하지 않는다** — 지수는 입력 축의 상태를 한 줄로 모은 것이다.
 
-**계산 위치와 시점** — `grading` 안의 **파생 축** `red_tide_risk`. 새 이미지·큐 주제는 없다. 입력 축 4개(`red_tide`·`water_temp`·`salinity`·`chlorophyll`) 중 하나의 `farm_readings` 행을 쓴 뒤 **같은 양식장의 지수를 다시 계산**한다. 수온(`interp.done`)과 속보(`obs.loaded`)는 서로 기다리지 않으므로 **늦게 온 쪽에서 다시 계산**한다 — 입력은 언제나 그 시점의 `farm_readings` 현재값이다. 입력 축 행·지수 행(세 표)·두 축의 `farm_reading_history`를 **한 트랜잭션**에 쓰고, 커밋 뒤 축 `red_tide_risk`의 `grade.done`을 따로 한 건 낸다(메시지 하나에 축 하나 — 2.2절. `axis`는 문자열이라 계약 `queue-v1` 그대로). `obs.loaded`와 `interp.done`이 동시에 처리되면 한쪽이 다른 쪽의 커밋 전 값을 읽을 수 있다 — 그 차이는 **다음 입력 갱신에서 수렴**한다(지수는 현재값만 둔다). `axis_status`(evaluation 산출)는 읽지 않는다 — 단계 순서가 거꾸로 된다.
+**계산 위치와 시점** — `grading` 안의 **파생 축** `red_tide_risk`. 새 이미지·큐 주제는 없다. 입력 축 4개(`red_tide`·`water_temp`·`salinity`·`chlorophyll`) 중 하나의 `farm_readings` 행을 쓴 뒤 **같은 양식장의 지수를 다시 계산**한다. 수온(`interp.done`)과 속보(`obs.loaded`)는 서로 기다리지 않으므로 **늦게 온 쪽에서 다시 계산**한다 — 입력은 언제나 그 시점의 `farm_readings` 현재값이다. 입력 축 행·지수 행(세 표)·두 축의 `farm_reading_history`를 **한 트랜잭션**에 쓰고, 커밋 뒤 축 `red_tide_risk`의 `grade.done`을 따로 한 건 낸다(메시지 하나에 축 하나 — 2.2절. `axis`는 문자열이라 계약 버전을 바꾸지 않았다 — 지금 계약은 `queue-v2`, 개정 22). `obs.loaded`와 `interp.done`이 동시에 처리되면 한쪽이 다른 쪽의 커밋 전 값을 읽을 수 있다 — 그 차이는 **다음 입력 갱신에서 수렴**한다(지수는 현재값만 둔다). `axis_status`(evaluation 산출)는 읽지 않는다 — 단계 순서가 거꾸로 된다.
 
 **항목** — 판정 정의 `risk_index.factors`(이름 고정 4개)
 

@@ -16,8 +16,8 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 | `common/config/` | `.env` 로딩(API 키·요청주소·DB 연결 문자열 — 값은 출력하지 않는다), 판정 정의(`config/definitions.yaml`, 이미지 안) 로딩, 운영 조정(ConfigMap) 로딩과 스키마 검사, API 정의 로딩 |
 | `common/http/` | 공통 호출층 (③-1) |
 | `common/classifier/` | 형식 판별, 스키마 계열, 결과 코드 → 상태 (③-3) |
-| `common/raw_store/` | 객체 저장소 인터페이스 — collector가 쓰고 processor가 읽는다. collector는 **메타만** 읽을 수 있다(어장환경 게시 감시가 직전 감시 원문의 건수와 비교 — 2.1절) (③-5) |
-| `common/queue/` | 큐 인터페이스 + 인메모리 구현(NATS JetStream 구현은 개정 22), 단계 간 알림 스키마 검사 (③-6) |
+| `common/raw_store/` | 원문 저장소 인터페이스 + **S3 구현**(개정 22)·로컬 디스크 구현 — collector가 쓰고 processor가 읽는다. collector는 **메타만** 읽을 수 있다(어장환경 게시 감시가 직전 감시 원문의 건수와 비교 — 2.1절) (③-5) |
+| `common/queue/` | 큐 인터페이스 + **NATS JetStream 구현**(ack·컨슈머 수신 루프·전달 소진 — 개정 22)·인메모리 구현, 단계 간 알림 스키마 검사 (③-6) |
 | `common/geo/` | 도분초 변환, 좌표 폐구간 검증, 거리 계산 (③-7) |
 | `common/farm_sites/` | 양식장 좌표 읽기 · 폐구간 검증 호출 (③-8) |
 | `common/contract_check/` | 기동 시 검사 — 테이블 존재·형태, 입력 단계 계약 버전, 운영 조정 스키마, 빈 해역 시드 (③-9) |
@@ -127,9 +127,11 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 - 연결 실패·타임아웃은 `body` 대신 `error: {type, message}`
 - 저장 직후 `body`를 사전 읽기해 결과 코드가 읽히는지 **확인만** 하고, 결과는 메타에 기록한다 (판정은 processor — 2.1절 사전 읽기 범위)
 - **DB 색인 행(`raw_index`)은 processor가 원문 메타로 쓴다**(2.3절, 결정 D1). collector는 DB에 쓰지 않는다 — 원문 저장과 `raw.fetched` 발행까지만. 단, 분할 합산 원문은 `completeness.collected`만 내고 색인 행이 없다(`reprocess` 대상 아님, 3.3절). `storage_key`가 고유라 같은 원문을 다시 처리해도 행이 늘지 않고, 받은 `raw_index.id`를 그 원문에서 나온 모든 적재 행의 `raw_id`로 쓴다. collector의 사전 읽기 결과(`precheck_code`)와 재시도 여부(`_retried`)는 원문 메타에 남긴다
-- **본문은 DB에 넣지 않는다.** 객체 저장소(S3/GCS, 로컬은 MinIO 또는 디스크)에 두고 DB에는 색인 행만 둔다 — 근거는 5.2절 (MySQL `TEXT` 64KB 한계). 저장 위치 최종 결정은 v1.5 12.1절 미결
-- 키: `raw/{api}/{yyyy}/{mm}/{dd}/{epoch_ms}_{tag}.json`. **`:` 등 OS 금지 문자 금지**
-- **다중 페이지 원문 보관**: 페이지별로 응답 본문을 각각 저장한다(`tag`로 구분, 예: `p1`·`p2`). processor가 여러 페이지 원문을 메모리에서 읽어 합산한다. 저장된 원문들을 하나로 합쳐 재직렬화한 뒤 저장하지 않는다(12절 원문 재직렬화 금지와 같은 원칙) *(제안)*
+- **본문은 DB에 넣지 않는다.** 본문 = **S3 raw-store 버킷**, 색인 = 메인 DB `raw_index`(2026-10-06 결정 — 근거 5.2절 MySQL `TEXT` 64KB + 메인 DB 부담)
+- **S3 구성 (2.3절, 개정 22)**: `RAW_STORE_DSN` = `s3://<버킷>[/<접두>]`이면 S3. **없으면 운영 진입점은 멈춘다** — 로컬 디스크는 테스트·시험 실행기가 **코드에서 구현체를 넘길 때만**(운영 진입점은 `RAW_STORE_PATH`를 읽지 않고 기본 경로로 떨어지지도 않는다). 키가 없으면 두 구현 모두 `None`. 형식 오류·연결 실패면 **기동을 멈춘다**. 조건부 쓰기는 S3 `If-None-Match`. 인증은 기본 자격 증명 체인(클러스터 IRSA) — 키를 이미지·Secret에 넣지 않는다. 로컬 MinIO 주소 `RAW_STORE_ENDPOINT`·계정은 로컬 `.env`에만 *(제안)*. 권한: collector 쓰기·읽기·목록, processor 역할 읽기·목록, 삭제 없음(정리는 S3 수명 주기 — 인프라). `get_meta`·`get_body`는 객체 하나를 받아 해석, `list_keys`는 페이지 단위로 끝까지
+- **같은 키가 있으면 쓰지 않는다**(조건부 쓰기 — 로컬 디스크 구현도 같게). 덮어쓰지 않고 쓰기 실패로 드러낸다. 쓰기 실패면 collector는 그 원문의 `raw.fetched`를 내지 않고 실패로 끝난다(지표 `raw_store_errors_total`)
+- 키: `raw/{api}/{yyyy}/{mm}/{dd}/{epoch_ms}_{tag}.json`. **`:` 등 OS 금지 문자 금지**. 날짜 폴더 = `fetched_at`(UTC) 날짜, **`epoch_ms` = 호출 시각(`fetched_at`과 같은 순간)의 밀리초** — 호출층이 원문 메타 `_fetched_ms`로 남긴다 *(제안 — 개정 22, 같은 초 키 충돌 해소)*. `load_id`(`{원문 키}::{파서 버전}`)가 `VARCHAR(64)` 안이어야 한다 — tag를 길게 만들지 않는다. `fetched_at`은 초 단위 그대로
+- **원문 하나 = HTTP 응답 하나.** 여러 응답을 합쳐 원문을 만들지 않는다(12절). 조위는 `min=5` 한 페이지(1.2절, 개정 22), NIFS 3종은 페이징이 없다. 이전 *(제안)* "페이지별 저장 후 processor 합산"은 필요 없어졌다
 
 ### ③-6 단계 간 알림 (2.2절)
 
@@ -138,7 +140,7 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 | `raw.fetched` | collector | processor | `raw_id`(= 원문 객체 키, `raw_index.storage_key`), `api`, `tag`, `fetched_at_utc` — 정기 경로 원문만(분할 합산 원문은 내지 않는다, 3.3절) |
 | `completeness.collected` | collector(`completeness`) | processor `completeness-check` | `run_key`, `api`, `window_start`·`window_end`, `single_raw_id`, `parts` — 받은 것만 (개정 17) |
 | `obs.loaded` | processor | interpolation(조위 수온만), **grading(모든 축)** | `load_id`, `api`, `source`, `station_ids`, `observed_from_utc`, `observed_to_utc`, `row_count` |
-| `interp.done` | interpolation | grading | `run_id`, `load_id`, `farm_count`, `metric`, `error_p95`, `stations_used` |
+| `interp.done` | interpolation | grading | `run_id`, `load_id`, `farm_count`, `metric`, `error_p95`(**널 허용** — 오늘의 오차 없음, `queue-v2`), `stations_used` |
 | `grade.done` | grading | evaluation | `grade_run_id`, `axis`, `farm_ids` |
 | `result.updated` | evaluation | (선택) 웹 서비스 캐시 무효화 | `farm_ids`, `axes`, `updated_at_utc` |
 
@@ -150,8 +152,9 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
   - `evaluation-sweep` — 알림이 끊긴 것 자체를 **침묵 판정**한다. 알림으로만 도는 구조에서는 "알림이 오지 않음"을 알아챌 단계가 따로 있어야 하기 때문이다
   - `interpolation-error` — 자기 산출물(오늘의 오차)만 하루 1회 만든다. 추정값(`interp.done`)을 대신 만들지 않으므로 추정이 멈추면 여전히 드러난다 *(제안 — 11절)*
 
-- 큐는 **NATS JetStream으로 결정**(2026-10-06, 계획서 11절)됐지만 구현체·수신 대기·스트림 설계는 개정 22에서 한다 — 그때까지 **`queue` 인터페이스 하나로 감싸고** 로컬 개발·시험 실행기(`flowtest`, 2.1.1절)는 인메모리 구현을 쓴다
-- 메시지 스키마는 `contracts/queue/`에 두고 현재 버전은 `queue-v1`이다(7.7절 `contracts`)
+- 큐는 **NATS JetStream**(2026-10-06 결정). **`queue` 인터페이스 하나로 감싸고** 운영 이미지는 JetStream 구현, 단위·연결 검사와 시험 실행기(`flowtest`, 2.1.1절)는 인메모리 구현(명시적으로 고를 때만)
+- **JetStream 구성 (계획서 2.2절, 개정 22)** — 접속 `QUEUE_DSN`, 없으면 운영 진입점은 멈춘다(인메모리 대체 금지). **모듈이 기동 시 스트림·컨슈머를 멱등 생성**(있으면 정의 파일의 **비교 필드만** 비교, 다르면 멈춤 — 서버 기본값·계약에 없는 컨슈머는 무시, 인프라는 선언하지 않는다). 정의 파일은 `contracts/queue/`. 복제 수는 `QUEUE_STREAM_REPLICAS` *(제안)* — 없으면 멈춘다. 설정을 바꾸는 릴리스는 인프라가 옛 스트림·컨슈머를 지운 뒤 새 이미지가 만든다. 스트림 `AQUASENTINEL`·주제 접두 `aquasentinel.` *(제안)*, **Interest 보존 + `max_age` 7일**. durable pull 컨슈머 — 이름 = 워크로드-주제 *(제안)*(`processor-raw-fetched`·`completeness-check-completeness-collected`·`interpolation-obs-loaded`·`grading-obs-loaded`·`grading-interp-done`·`evaluation-grade-done`). **어느 이미지든 기동 시 계약의 컨슈머 전부를 확인·생성** *(제안)* — Interest는 컨슈머가 없을 때 발행된 메시지를 남기지 않는다. 발행은 서버 확인을 받아야 성공. `Nats-Msg-Id` = **`{주제}:{키}`**(스트림 하나라 중복 창이 주제를 가리지 않는다), 키는 **메시지 하나를 가리키도록** — `raw.fetched` = `raw_id`, `completeness.collected` = `run_key`+`api`, `obs.loaded` = `load_id`, `interp.done` = `run_id`, `grade.done` = `grade_run_id`+`axis`, `result.updated`는 없음(한 실행이 같은 주제로 여러 건을 낸다). **DB 커밋·다음 알림 발행을 마친 뒤 ack**, 예외면 클라이언트가 전달 횟수에 따라 지연 nak(간격 *(제안)* 10·30·60·120초, 테스트에서 주입 가능 — 컨슈머 `backoff`는 쓰지 않는다). 재전달 때 같은 결과·같은 다음 알림이 나오도록 **실행 ID는 입력 키에서 결정적으로**(interpolation `run_id`, grading `grade_run_id` — UUID v5 *(제안)*, 64자 안). 스트림 주제 설정은 와일드카드 `aquasentinel.>` 하나 *(제안)* — 주제를 더해도 스트림 비교가 바뀌지 않게. `ack_wait` 30초 — 오래 걸리는 핸들러는 처리 중 연장 *(제안)*. `max_deliver` 5 — 마지막 전달도 실패하면 `ops_events` `QUEUE_DELIVERY_EXHAUSTED` 후 `term`(파드 종료·`ack_wait` 초과로 끝난 소진은 이벤트를 못 쓴다 — 서버 알림·인프라 지표로 본다). 계약 버전이 다른 메시지는 운영 이벤트 + `term`. 컨슈머 진입점은 **수신 대기**(점검 C17), SIGTERM이면 처리 중 메시지를 마치고 끝낸다. 큐·원문 저장소의 **구현 선택과 연결 확인은 진입점 `main()` 층**에 둔다(꺼낸 기동 시 검사 함수에 넣지 않는다 — 시험 실행기는 반대로 "있으면 멈춤"). 라이브러리 `nats-py`(asyncio) — 큐 구현 안에서 감싸고 단계 핸들러 시그니처는 그대로
+- 메시지 스키마는 `contracts/queue/`에 두고 현재 버전은 **`queue-v2`**다(개정 22 — `interp.done.error_p95` 널 허용, 기존 필드 변경이라 버전 올림. 발행자·소비자·계약 검사·5종 이미지 기대 버전을 같은 릴리스에서, 7.7절 `contracts`)
 - **큐 `publish` 메시지 타입**: `Queue.publish(msg: Message)` — `Message(topic, payload)` 래퍼를 쓴다. `dict`를 직접 넘기지 않는다. 타입 계약을 내부 인터페이스에서도 강제해 타입 불일치를 조기에 잡는다 *(제안)*(2.2절)
 
 ### ③-7 좌표 (1.5·6.1·7.7절)
@@ -183,7 +186,7 @@ description: "src/api_module/common/(repository 제외)과 수집·가공 공통
 - 통과하면 **설정 해시**를 `ops_events`(`OPERATIONAL_CONFIG_LOADED`)와 지표 `operational_config_info`에 기록한다. 게이트를 거치지 않은 변경도 운영 탭에서 보인다
 - 값은 **기동 시 한 번 읽는다.** 실행 중 다시 읽지 않는다 — 어느 판정이 어느 설정으로 났는지 추적할 수 있게 한다. ConfigMap 변경의 반영은 롤아웃(재시작)이며 방식은 인프라가 구성한다
 
-- **테이블 검사**: 이 모듈이 기대하는 테이블이 없거나 정의와 다르면 기동 시 멈추고 차이를 보고한다. 스스로 만들지 않는다(2.0.3절)
+- **테이블 검사**: 이 모듈이 기대하는 테이블이 없거나 정의와 다르면 기동 시 멈추고 차이를 보고한다 — 표·열·**고유 키**(컬럼 조합 기준, 이름 무관 — 개정 22, `repository` skill). 스스로 만들지 않는다(2.0.3절)
 - **빈 해역 시드 검사 (개정 19, 4.3절)**: 테이블 검사 다음에 — `grading`은 `areas`, `evaluation`(`evaluate`·`sweep`, `gate` 제외)은 `areas`·`axis_coverage`가 0행이면 멈추고 보고한다. processor는 하지 않는다(DB 시드 표를 읽지 않는다). 일부만 빈 경우는 잡지 않는다 — `seed-check`의 몫
 - **서비스 전 시드 점검 `seed-check` (개정 19, 4.3절)**: `python -m processor.main seed-check`. `DATABASE_URL`만 — 테이블 검사만 하고 운영 조정을 읽지 않으며 DB에 쓰지 않는다(`startup()`을 타지 않는다). ① DB 세 표 = 이미지 시드 파일(빠진 행·더 있는 행·다른 값, `season_months`는 해석한 값) ② `area_aliases`·`axis_coverage`의 `area_id` ⊂ `areas` ③ 적조 현재값 유효 기간 안 `bulletin_detail_areas.area_id` ⊂ `areas`. 차이를 표로 보고하고 종료 코드 1. **기동 시 검사로 두지 않는다** — processor 기동을 막으면 다른 원천 적재까지 멈춘다. 시드 읽기는 `common/`(`load_seeds`·`_load_area_aliases`·SQL 생성기 공용)
 - **계약 버전 검사**: 각 이미지는 자기가 따르는 계약 버전(단계 간 알림·결과 테이블·운영 조정)을 갖고, 기동할 때 맞지 않으면 멈추고 보고한다. 옛 형식을 새 형식으로 조용히 읽지 않는다(2.1절)
@@ -210,7 +213,7 @@ v1.5 7.3절 규칙 중 이 모듈이 구현하는 것. R6(QC 플래그)은 폐�
 
 ### ③-11 `adapter_health` 기록 (4.9절)
 
-- **`adapter_health` 갱신 규칙** (v1.5 4.5절 "헬스체크" 열) — `processor`가 원문 해석 결과로 기록한다. 키 `adapter`는 **수집 원천**(`tide`·`bulletin`·`line`·`fishery` — 결정 D2)이다. 한 원천에 api_id·`tag`가 여럿(어장환경 감시·백필·완전성)이라 원천 단위로 센다. 재시도 여부는 원문 메타의 `_retried`
+- **`adapter_health` 갱신 규칙** (v1.5 4.5절 "헬스체크" 열) — `processor`가 원문 해석 결과로 기록한다. **조위 보충 원문(어제분, tag `_y`)은 갱신하지 않는다**(개정 22, 계획서 1.2절). 키 `adapter`는 **수집 원천**(`tide`·`bulletin`·`line`·`fishery` — 결정 D2)이다. 한 원천에 api_id·`tag`가 여럿(어장환경 감시·백필·완전성)이라 원천 단위로 센다. 재시도 여부는 원문 메타의 `_retried`
   - **성공** — `OK`·`OK_EMPTY`·`NO_DATA`: `last_success_utc` 갱신, `consecutive_failures` 초기화
   - **실패** — `HTTP_ERROR`·`NET_ERROR`(진짜 장애): `last_failure_utc` 갱신, `consecutive_failures` 증가
   - **별도** — `TIMEOUT_05`: 재시도로 복구되면 `retry_recovered`만 올리고 실패로 세지 않는다. 재시도 후에도 `05`면 실패와 같게 센다 *(제안)*
@@ -218,8 +221,8 @@ v1.5 7.3절 규칙 중 이 모듈이 구현하는 것. R6(QC 플래그)은 폐�
 
 ### ③-12 진입점 (2.1·6.1절)
 
-- **`collector/main.py`** — 워크로드 명령(`collector-tide`·`collector-bulletin`·`collector-line`·`collector-fishery-watch`·`collector-fishery-backfill`·`collector-completeness`)마다 등록된 원천 어댑터를 부른다. 매니페스트는 접두 없는 이름(`tide`·`bulletin`·`line`·`fishery-backfill`·`completeness`, 감시는 `python -m collector.fishery_watch`)을 넘긴다 — 진입점의 `WORKLOADS` 표가 워크로드 → 어댑터 api_id를 정한다(`completeness`는 3개). 어댑터는 진입점이 import해 등록하고, 실행은 `collector.main` 모듈의 함수로 한다(`__main__` 레지스트리 분리 방지). **호출 실패도 원문(error 기록)으로 저장·발행한다**(2.3절) — 버리면 `adapter_health`가 장애를 볼 수 없다(개정 16). **판정하지 않는다** — 원문과 요청 메타데이터만 남기고 `raw.fetched`를 발행한다. 수집 범위를 정하는 사전 읽기(결과 코드 존재, `totalCount`, 어장환경 올해 창 건수 — 직전 감시 원문의 메타 건수와 비교해 전량 수집 여부)만 허용하고, 그 결과를 상태 판정·적재에 쓰지 않는다
-- **`processor/main.py`** — `process`: `raw.fetched` 소비 → 원문 읽기 → `classifier` → 원천 어댑터의 해석·정규화 → `completeness` → `quality` → 적재(`processor/_load.py` — `raw_index`·`ingest_runs`·관측·`stations`, I-12) → `adapter_health` 갱신(`processor/_health.py`) → `obs.loaded`. 적재와 헬스 갱신은 한 트랜잭션이고, 실패하면 알림을 내지 않는다. 받을 어댑터가 없는 api_id 중 설계 대기는 `PENDING_APIS`에 명시한다(개정 17 이후 비어 있다 — 분할 합산 원문은 `raw.fetched`로 오지 않는다). `reprocess`: 원문 ID(`raw_index.id`) 범위 `--raw-id-from`·`--raw-id-to`(양끝 포함)를 다시 처리한다(파서 수정 후 — 같은 파서 버전이면 아무것도 쓰지 않는다, 개정 15). 재처리할 때마다 `ingest_runs`에 행을 추가한다 — 고유 (`raw_id`, `parser_version`)이므로 같은 파서로 같은 원문을 다시 처리하면(중복 알림) 행이 늘지 않는다(5.3절)
+- **`collector/main.py`** — 워크로드 명령(`collector-tide`·`collector-bulletin`·`collector-line`·`collector-fishery-watch`·`collector-fishery-backfill`·`collector-completeness`)마다 등록된 원천 어댑터를 부른다. 매니페스트는 접두 없는 이름(`tide`·`bulletin`·`line`·`fishery-backfill`·`completeness`, 감시는 `python -m collector.fishery_watch`)을 넘긴다 — 진입점의 `WORKLOADS` 표가 워크로드 → 어댑터 api_id를 정한다(`completeness`는 3개). 어댑터는 진입점이 import해 등록하고, 실행은 `collector.main` 모듈의 함수로 한다(`__main__` 레지스트리 분리 방지). **호출 실패도 원문(error 기록)으로 저장·발행한다**(2.3절) — 버리면 `adapter_health`가 장애를 볼 수 없다(개정 16). **판정하지 않는다** — 원문과 요청 메타데이터만 남기고 `raw.fetched`를 발행한다. 수집 범위를 정하는 사전 읽기(결과 코드 존재, 어장환경 올해 창 건수 — 직전 감시 원문의 메타 건수와 비교해 전량 수집 여부)만 허용하고, 그 결과를 상태 판정·적재에 쓰지 않는다
+- **`processor/main.py`** — `process`: `raw.fetched` 소비 → 원문 읽기(**원문이 없으면 예외** — 큐에서 재전달·소진으로 드러나게, 개정 22) → `classifier` → 원천 어댑터의 해석·정규화 → `completeness` → `quality` → 적재(`processor/_load.py` — `raw_index`·`ingest_runs`·관측·`stations`, I-12) → `adapter_health` 갱신(`processor/_health.py`) → `obs.loaded`. 적재와 헬스 갱신은 한 트랜잭션이고, 실패하면 알림을 내지 않는다. 받을 어댑터가 없는 api_id 중 설계 대기는 `PENDING_APIS`에 명시한다(개정 17 이후 비어 있다 — 분할 합산 원문은 `raw.fetched`로 오지 않는다). `reprocess`: 원문 ID(`raw_index.id`) 범위 `--raw-id-from`·`--raw-id-to`(양끝 포함)를 다시 처리한다(파서 수정 후 — 같은 파서 버전이면 아무것도 쓰지 않는다, 개정 15). 재처리할 때마다 `ingest_runs`에 행을 추가한다 — 고유 (`raw_id`, `parser_version`)이므로 같은 파서로 같은 원문을 다시 처리하면(중복 알림) 행이 늘지 않는다(5.3절)
 - 단계 전용 코드끼리 import하지 않는다 — 진입점이 원천 어댑터를 부르는 것은 같은 이미지 안의 등록이다. 예외는 시험 실행기 `flowtest/`가 단계를 가져다 쓰는 것 하나다(계획서 2.1.1절) — 단계 코드는 `flowtest/`를 가져다 쓰지 않는다
 
 ### ③-13 운영 지표 (9절)
@@ -235,6 +238,8 @@ v1.5 7.3절 규칙 중 이 모듈이 구현하는 것. R6(QC 플래그)은 폐�
 | `observation_missing_ratio` | `station_id`, `metric` |
 | `publication_check_total_count` | `axis`, `year` |
 | `completeness_mismatch_total` | `api`, `status` |
+| `queue_redelivered_total` · `queue_delivery_exhausted_total` | `topic`, `consumer` (개정 22) |
+| `raw_store_errors_total` | `op`, `image` (개정 22) |
 | `completeness_last_checked_timestamp` | `api` |
 | `bulletin_window_missing_total` | — |
 | `bulletin_window_check_skipped_total` | `reason` |
@@ -336,7 +341,7 @@ v1.5 7.3절 규칙 중 이 모듈이 구현하는 것. R6(QC 플래그)은 폐�
 
 | # | 검사 | 통과 기준 |
 | --- | --- | --- |
-| B3 | `grading`이 알림 계약 `queue-v2`로 발행, `evaluation`은 `queue-v1` | `evaluation`이 **처리하지 않고** 운영 이벤트를 남김. 결과 테이블 변경 0건 |
+| B3 | `grading`이 알림 계약 `queue-v3`(가상)로 발행, `evaluation`은 현재 `queue-v2` | `evaluation`이 **처리하지 않고** 운영 이벤트를 남김. 결과 테이블 변경 0건 |
 | B4 | 결과 테이블 계약이 DB와 다른 상태로 `evaluation` 기동 | 기동 멈춤 + 차이 보고 |
 | B6 | 운영 조정 ConfigMap 없음 / 키 누락 / 모르는 키 / `<미결>` 자리 표시 / 스키마 버전 불일치로 `processor`·`evaluation` 기동 | 각각 **기동 멈춤 + 차이 보고.** `operational.initial.yaml`이나 기본값으로 떠오르면 실패 |
 | B8 | 기동 성공 | `ops_events`에 `OPERATIONAL_CONFIG_LOADED`와 설정 해시 1건 |

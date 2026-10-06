@@ -81,7 +81,9 @@ interpolation.error_window_days: 30     # 결과 보기 전 고정 — 채택 20
 
 | 주제 | 발행 | 소비 | 본문 |
 | --- | --- | --- | --- |
-| `interp.done` | interpolation | grading | `run_id`, `load_id`, `farm_count`, `metric`, `error_p95`, `stations_used` |
+| `interp.done` | interpolation | grading | `run_id`, `load_id`, `farm_count`, `metric`, `error_p95`(**널 허용** — 오늘의 오차가 없으면 지어내지 않고 널, `queue-v2` 개정 22), `stations_used` |
+
+- **`run_id`는 입력에서 결정적으로 만든다**(개정 22) — UUID v5(이름 = `load_id`+`metric`) *(제안)*, `VARCHAR(64)` 안(입력 키를 그대로 이으면 넘친다). `obs.loaded`가 재전달되면 같은 `run_id`·같은 `interp.done`이 나와야 한다. `uuid4`면 재전달 때 `interpolation_runs`의 고유 (`load_id`, `metric`)에 걸려 예외 → 전달 소진 → `interp.done` 유실
 
 - **멱등**: `interpolation_runs`의 고유 (`load_id`, `metric`)가 멱등 키다. 같은 `obs.loaded`가 두 번 와도 같은 행이 되고, `interp.done`도 같은 `run_id`로 나간다
 - `interpolation_error`는 두 곳에서 쓴다 — `interpolation-error`(하루 1회, 그날 쓰인 관측소 집합)와 컨슈머(**처음 보는 관측소 집합**이면 그 자리에서 산출). 키가 (`station_set_key`, `metric`, `window_days`, `computed_on`)라 같은 날 같은 집합은 한 행이다
