@@ -445,11 +445,16 @@ def main(argv: list[str] | None = None) -> int:
         run_sweep(_repository())
         return 0
     if cmd == "evaluate":
-        from common.queue import MemoryQueue
+        # QUEUE_DSN 있으면 NatsQueue, 없으면 멈춘다 (2.2절, 개정 22 — MemoryQueue 폴백 금지)
+        from common.queue import NatsQueue
         repo = _repository()
         cfg = _load_cfg()                       # 기동 시 한 번 (2.0.6절)
-        q = MemoryQueue()
-        q.subscribe("grade.done", lambda msg: handle_grade_done(msg.payload, repo, q, cfg))
+        _nq = NatsQueue.from_env(
+            consumer_name="evaluation-grade-done",
+            subscribed_topic="grade.done",
+            repo=repo,
+        )
+        _nq.run(lambda msg: handle_grade_done(msg.payload, repo, _nq, cfg))
         return 0
     print(f"알 수 없는 명령: {cmd}", file=sys.stderr)
     return 1

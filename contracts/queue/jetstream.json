@@ -1,0 +1,41 @@
+{
+  "$comment": "NATS JetStream 스트림·컨슈머 정의 (계획서 2.2절 JetStream 구성, 개정 22). 모듈이 기동 시 이 파일대로 멱등 생성하고, 있으면 compare_fields만 비교해 다르면 멈춘다. 값은 계획서·인프라 회신(2026-10-06)과 같다",
+  "contract": "queue-v2",
+  "subject_prefix": "aquasentinel",
+  "stream": {
+    "name": "AQUASENTINEL",
+    "subjects": ["aquasentinel.>"],
+    "retention": "interest",
+    "storage": "file",
+    "max_age_seconds": 604800,
+    "duplicate_window_seconds": 120
+  },
+  "consumer_defaults": {
+    "ack_policy": "explicit",
+    "deliver_policy": "all",
+    "ack_wait_seconds": 30,
+    "max_deliver": 5
+  },
+  "nak_delays_seconds": [10, 30, 60, 120],
+  "in_progress_interval_seconds": 10,
+  "consumers": [
+    {"name": "processor-raw-fetched", "workload": "processor", "topic": "raw.fetched"},
+    {"name": "completeness-check-completeness-collected", "workload": "completeness-check", "topic": "completeness.collected"},
+    {"name": "interpolation-obs-loaded", "workload": "interpolation", "topic": "obs.loaded"},
+    {"name": "grading-obs-loaded", "workload": "grading", "topic": "obs.loaded"},
+    {"name": "grading-interp-done", "workload": "grading", "topic": "interp.done"},
+    {"name": "evaluation-grade-done", "workload": "evaluation", "topic": "grade.done"}
+  ],
+  "msg_id_keys": {
+    "raw.fetched": ["raw_id"],
+    "completeness.collected": ["run_key", "api"],
+    "obs.loaded": ["load_id"],
+    "interp.done": ["run_id"],
+    "grade.done": ["grade_run_id", "axis"],
+    "result.updated": []
+  },
+  "compare_fields": {
+    "stream": ["subjects", "retention", "storage", "max_age", "duplicate_window", "num_replicas"],
+    "consumer": ["filter_subject", "ack_policy", "deliver_policy", "ack_wait", "max_deliver"]
+  }
+}

@@ -138,6 +138,7 @@ def load(
     parser_version: str,
     now_utc: datetime,
     untimed_rows: int = 0,
+    skip_health: bool = False,
 ) -> LoadResult:
     status = response_status(pr, meta, completeness)
     with repo.transaction() as tx:
@@ -174,7 +175,7 @@ def load(
         if hasattr(adapter, "stations") and body is not None:
             written.update(_load_stations(tx, adapter.stations(pr, meta), rows, dropped))
 
-        if first_time:
+        if first_time and not skip_health:
             _update_health(tx, api, status, meta, now_utc)
 
         events = []

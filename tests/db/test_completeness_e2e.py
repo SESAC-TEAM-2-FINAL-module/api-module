@@ -20,7 +20,7 @@ from .conftest import count_rows
 
 _ROOT = Path(__file__).parents[2]
 _FIX = _ROOT / "fixtures" / "raw"
-_CONTRACT = json.loads((_ROOT / "contracts" / "queue" / "queue-v1.json").read_text("utf-8"))
+_CONTRACT = json.loads((_ROOT / "contracts" / "queue" / "queue-v2.json").read_text("utf-8"))
 _END = date(2025, 11, 30)          # 고정한 실행의 "KST 어제" — 세 원천 픽스처가 모두 이 창에 항목을 갖는다
 _RUN_KEY = "20251201T000000"
 

@@ -71,9 +71,20 @@ class TestSD1Entrypoints:
                    operational=yaml.safe_load(OPERATIONAL.read_text("utf-8")), repo=repo)
 
     def test_seeded_db_starts(self, db_env, clean_db, repo, monkeypatch):
+        import common.queue as cq
         import evaluation.main as ev
         import grading.main as gr
         from common.seeds import load_seeds
+
+        class _FakeNats:
+            @classmethod
+            def from_env(cls, **kwargs):
+                return cls()
+            def run(self, handler):
+                pass
+
+        monkeypatch.setattr(cq, "NatsQueue", _FakeNats)
+
         load_seeds(repo)
         gr.main([])
         assert ev.main(["evaluate"]) == 0

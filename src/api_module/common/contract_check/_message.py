@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-QUEUE_CONTRACT = "queue-v1"
+QUEUE_CONTRACT = "queue-v2"
 
 
 def accept_message(payload: dict, topic: str, repo) -> bool:

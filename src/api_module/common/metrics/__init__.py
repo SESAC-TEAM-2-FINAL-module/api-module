@@ -4,6 +4,7 @@ from ._metrics import (
     collector_retry_total,
     collector_duration_seconds,
     raw_bytes_total,
+    raw_store_errors_total,
     processor_parse_failure_total,
     observation_latest_age_seconds,
     observation_missing_ratio,
@@ -23,7 +24,7 @@ from ._metrics import (
 __all__ = [
     "Counter", "Gauge", "Histogram",
     "collector_calls_total", "collector_retry_total", "collector_duration_seconds",
-    "raw_bytes_total", "processor_parse_failure_total",
+    "raw_bytes_total", "raw_store_errors_total", "processor_parse_failure_total",
     "observation_latest_age_seconds", "observation_missing_ratio",
     "publication_check_total_count", "completeness_mismatch_total", "completeness_last_checked_timestamp",
     "bulletin_window_missing_total", "bulletin_window_check_skipped_total",

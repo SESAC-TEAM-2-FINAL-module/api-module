@@ -1,4 +1,4 @@
-"""
+﻿"""
 분할 합산 수집 (계획서 3.3절 "분할 합산 처리 경로", 개정 17)
 
 원천마다 같은 실행에서 **단일 창을 먼저 1회, 이어서 그 창의 월 분할**을 받고, 다 받으면
@@ -57,7 +57,7 @@ def collect(
                       "raw_id": _save(f"cmp_{run.run_key}_part_{_ymd(ps)}_{_ymd(pe)}", ps, pe)})
 
     payload = {
-        "schema": "queue-v1", "topic": "completeness.collected",
+        "schema": "queue-v2", "topic": "completeness.collected",
         "run_key": run.run_key, "api": api_base,
         "window_start": _ymd(start), "window_end": _ymd(end),
         "single_raw_id": single, "parts": parts,

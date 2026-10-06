@@ -8,7 +8,7 @@ from typing import Callable
 class Message:
     topic: str
     payload: dict
-    schema: str = "queue-v1"
+    schema: str = "queue-v2"
 
 
 class Queue:

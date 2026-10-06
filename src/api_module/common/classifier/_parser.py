@@ -25,9 +25,13 @@ _CODE_MAP: dict[str, str] = {
     "11": "BAD_REQUEST",
     "12": "NO_SERVICE",
     "20": "KEY_ERROR",
+    "21": "KEY_ERROR",
     "22": "QUOTA",
     "30": "KEY_ERROR",
+    "31": "KEY_ERROR",
     "32": "KEY_ERROR",
+    "33": "KEY_ERROR",
+    "40": "SUSPENDED",
     "41": "SUSPENDED",
 }
 

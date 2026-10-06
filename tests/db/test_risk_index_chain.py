@@ -139,7 +139,7 @@ class TestConnection1ObsLoaded:
 
     def _obs_payload(self) -> dict:
         return {
-            "schema": "queue-v1",
+            "schema": "queue-v2",
             "topic": "obs.loaded",
             "load_id": "L1",
             "api": "dtRecent",
@@ -244,7 +244,7 @@ class TestK4ObsOrder:
         import grading.main as gr
         defs = _defs_test()
         payload = {
-            "schema": "queue-v1", "topic": "obs.loaded", "load_id": "L1",
+            "schema": "queue-v2", "topic": "obs.loaded", "load_id": "L1",
             "api": "dtRecent", "source": "tide", "station_ids": [],
             "observed_from_utc": "2026-10-02T00:00:00",
             "observed_to_utc": "2026-10-02T00:00:00", "row_count": 0,
@@ -293,7 +293,7 @@ class TestConnection1InterpDone:
 
         q = MemoryQueue()
         gr.handle_interp_done({
-            "schema": "queue-v1", "topic": "interp.done",
+            "schema": "queue-v2", "topic": "interp.done",
             "run_id": run_id, "error_p95": 0.5, "stations_used": 1,
         }, repo, q, defs)
 
@@ -320,7 +320,7 @@ class TestConnection2EvaluationGradeDone:
 
     def _grade_done_payload(self) -> dict:
         return {
-            "schema": "queue-v1", "topic": "grade.done",
+            "schema": "queue-v2", "topic": "grade.done",
             "grade_run_id": "G1", "axis": "red_tide_risk",
             "farm_ids": [_FARM_ID],
         }
@@ -397,7 +397,7 @@ class TestConnection3PendingDefs:
         from common.config import load_definitions
         q = MemoryQueue()
         gr.handle_obs_loaded({
-            "schema": "queue-v1", "topic": "obs.loaded", "load_id": "L1",
+            "schema": "queue-v2", "topic": "obs.loaded", "load_id": "L1",
             "api": "dtRecent", "source": "tide", "station_ids": [],
             "observed_from_utc": "2026-10-02T00:00:00",
             "observed_to_utc": "2026-10-02T00:00:00", "row_count": 0,

@@ -1,4 +1,4 @@
-"""
+﻿"""
 가공 진입점 (2.1절, 6.1절)
 process: raw.fetched 소비 → classifier → 어댑터 해석·정규화 → completeness → quality → 적재(_load, 한 트랜잭션) → obs.loaded
 reprocess: 원문 ID(raw_index.id) 범위 재처리 (파서 수정 후, `--raw-id-from`·`--raw-id-to`). 재처리마다 ingest_runs 행 추가, 같은 (raw_id, parser_version)은 중복 추가 안 함
@@ -97,6 +97,12 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
 
 
+def _is_supplement(raw_id: str) -> bool:
+    """보충 원문 판별 — tag가 _y로 끝나면 True (1.2절, 개정 22). tag는 storage_key 파일명 {epoch_ms}_{tag}.json에서 추출"""
+    tag = _storage_tag(raw_id)
+    return tag is not None and tag.endswith("_y")
+
+
 def _process_one(raw_id: str, api: str, queue: Queue) -> None:
     """raw_id = 원문 객체 키(raw_index.storage_key, 결정 D1)"""
     if not _CONFIG:
@@ -104,8 +110,7 @@ def _process_one(raw_id: str, api: str, queue: Queue) -> None:
 
     meta = get_raw_meta(raw_id)
     if meta is None:
-        print(f"[processor] 원문 없음: {raw_id}", file=sys.stderr)
-        return
+        raise RuntimeError(f"[processor] 원문 없음: {raw_id}")
     body = get_raw_body(raw_id)
 
     adapter = _REGISTRY.get(api) or _REGISTRY.get(_ADAPTER_ALIAS.get(api, ""))
@@ -138,12 +143,15 @@ def _process_one(raw_id: str, api: str, queue: Queue) -> None:
                                           request_window=(sdate, edate) if sdate and edate else None)
         rows = apply_quality(rows, api, _CONFIG["definitions"], operational=_CONFIG["operational"])
 
+    # 보충 원문(_y): 관측·색인 적재까지만 — obs.loaded 미발행, adapter_health 미갱신 (1.2절, 개정 22)
+    supplement = _is_supplement(raw_id)
+
     # 적재 — 한 트랜잭션. 예외가 나면 알림을 내지 않는다 (I-12)
     result = load(
         _CONFIG["repo"],
         storage_key=raw_id, api=api, meta=meta, body=body, pr=pr, rows=rows,
         completeness=completeness, adapter=adapter, parser_version=PARSER_VERSION, now_utc=_now_utc(),
-        untimed_rows=untimed,
+        untimed_rows=untimed, skip_health=supplement,
     )
     # 적조 직전 원문 대조 지표 — 커밋 뒤 (3.3절, 개정 18)
     if result.window_missing:
@@ -151,12 +159,16 @@ def _process_one(raw_id: str, api: str, queue: Queue) -> None:
     if result.window_skip:
         bulletin_window_check_skipped_total.labels(reason=result.window_skip).inc()
 
+    if supplement:
+        # 보충 원문은 obs.loaded를 내지 않는다 (1.2절, 개정 22)
+        return result
+
     ok_rows = [r for r in rows if r.get("quality_flag") != "MISSING"]
 
     queue.publish(Message(
         topic="obs.loaded",
         payload={
-            "schema": "queue-v1",
+            "schema": "queue-v2",
             "topic": "obs.loaded",
             "load_id": f"{raw_id}::{PARSER_VERSION}",
             "api": api,
@@ -284,5 +296,11 @@ if __name__ == "__main__":
         _q.subscribe("completeness.collected", lambda msg: _m.completeness_check(msg.payload))
     else:
         # 명령 없음 = raw.fetched 컨슈머 (handoff/k8s/processor.yaml Deployment)
-        _q = MemoryQueue()
-        _q.subscribe("raw.fetched", lambda msg: _m.handle_raw_fetched(msg.payload, _q))
+        # QUEUE_DSN 있으면 NatsQueue, 없으면 멈춘다 (2.2절, 개정 22 — MemoryQueue 폴백 금지)
+        from common.queue import NatsQueue
+        _nq = NatsQueue.from_env(
+            consumer_name="processor-raw-fetched",
+            subscribed_topic="raw.fetched",
+            repo=_m._CONFIG.get("repo"),
+        )
+        _nq.run(lambda msg: _m.handle_raw_fetched(msg.payload, _nq))

@@ -134,8 +134,8 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
     )
 
     # 양식장별 IDW
-    # run_id는 이 적재(load_id+metric)에 ONE — unique(load_id, metric) 제약과 대응
-    run_id = str(uuid.uuid4())
+    # run_id: 입력 키(load_id+metric)에서 결정적으로 생성 — UUID v5 (재전달 멱등, 개정 22)
+    run_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{load_id}:{metric}"))
     error_window_days_val = None if _is_pending(cfg.get("error_window_days")) else int(cfg["error_window_days"])
 
     farm_rows = repo.get_farm_sites()
@@ -273,15 +273,14 @@ def main(argv: list[str] | None = None) -> None:
     if args and args[0] in ("interpolation-error", "error"):
         run_interpolation_error(repo, defs)
     else:
-        from common.queue import MemoryQueue
-
-        q = MemoryQueue()
-
-        def _handler(msg: Message) -> None:
-            handle_obs_loaded(msg.payload, repo, q, defs)
-
-        q.subscribe("obs.loaded", _handler)
-        log.info("interpolation 컨슈머 대기 중 (obs.loaded)")
+        # QUEUE_DSN 있으면 NatsQueue, 없으면 멈춘다 (2.2절, 개정 22 — MemoryQueue 폴백 금지)
+        from common.queue import NatsQueue
+        _nq = NatsQueue.from_env(
+            consumer_name="interpolation-obs-loaded",
+            subscribed_topic="obs.loaded",
+            repo=repo,
+        )
+        _nq.run(lambda msg: handle_obs_loaded(msg.payload, repo, _nq, defs))
 
 
 if __name__ == "__main__":

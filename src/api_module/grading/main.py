@@ -347,8 +347,10 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
             tr.upsert_farm_reading_history(history)
         ri_farm_ids = _write_risk_index(tr, farm_ids, defs, now)
 
-    # 갱신한 축마다 grade.done 하나 — evaluation은 axis 하나씩 판정한다 (2.2절, queue-v1 grade_done)
-    grade_run_id = str(uuid.uuid4())
+    # 갱신한 축마다 grade.done 하나 — evaluation은 axis 하나씩 판정한다 (2.2절)
+    # grade_run_id: obs.loaded load_id에서 결정적으로 생성 — UUID v5 (재전달 멱등, 개정 22)
+    load_id = payload.get("load_id", "")
+    grade_run_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"obs.loaded:{load_id}"))
     by_axis: dict[str, list[str]] = {}
     for r in readings:
         by_axis.setdefault(r["axis"], []).append(r["farm_id"])
@@ -478,7 +480,8 @@ def handle_interp_done(payload: dict, repo, queue: Queue, defs: dict) -> None:
             tr.upsert_farm_reading_history(history)
             ri_farm_ids = _write_risk_index(tr, farm_ids, defs, now)
 
-    grade_run_id = str(uuid.uuid4())
+    # grade_run_id: interp.done run_id에서 결정적으로 생성 — UUID v5 (재전달 멱등, 개정 22)
+    grade_run_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"interp.done:{run_id}"))
     _publish_grade_done(queue, grade_run_id, "water_temp", farm_ids)
     if ri_farm_ids:
         _publish_grade_done(queue, grade_run_id, "red_tide_risk", ri_farm_ids)
@@ -629,19 +632,27 @@ def main(argv: list[str] | None = None) -> None:
     repo = SqlRepository(engine)
     defs = startup_checks(repo)  # defs는 startup_checks 내부에서 로드 (원래 순서)
 
-    from common.queue import MemoryQueue
-
-    q = MemoryQueue()
-
-    def _obs_handler(msg: Message) -> None:
-        handle_obs_loaded(msg.payload, repo, q, defs)
-
-    def _interp_handler(msg: Message) -> None:
-        handle_interp_done(msg.payload, repo, q, defs)
-
-    q.subscribe("obs.loaded", _obs_handler)
-    q.subscribe("interp.done", _interp_handler)
-    log.info("grading 컨슈머 대기 중 (obs.loaded · interp.done)")
+    # QUEUE_DSN 있으면 NatsQueue, 없으면 멈춘다 (2.2절, 개정 22 — MemoryQueue 폴백 금지)
+    # grading은 obs.loaded와 interp.done 두 주제를 소비한다 — 컨슈머마다 NatsQueue 인스턴스 (개정 22)
+    from common.queue import NatsQueue
+    _nq_obs = NatsQueue.from_env(
+        consumer_name="grading-obs-loaded",
+        subscribed_topic="obs.loaded",
+        repo=repo,
+    )
+    _nq_interp = NatsQueue.from_env(
+        consumer_name="grading-interp-done",
+        subscribed_topic="interp.done",
+        repo=repo,
+    )
+    import threading
+    _t = threading.Thread(
+        target=_nq_interp.run,
+        args=(lambda msg: handle_interp_done(msg.payload, repo, _nq_interp, defs),),
+        daemon=True,
+    )
+    _t.start()
+    _nq_obs.run(lambda msg: handle_obs_loaded(msg.payload, repo, _nq_obs, defs))
 
 
 if __name__ == "__main__":

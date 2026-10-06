@@ -65,9 +65,17 @@ def _wrap(stage: str, topic: str, handler, stats: _Stats):
 def _preflight(repo, defs: dict, collect_mode: bool) -> dict:
     """
     읽기 전용 검사 전부 — 모두 통과한 뒤에만 processor.startup()을 부른다 (2.1.1절).
-    순서: 운영 조정 스키마 → 단계별 기동 시 검사 → seed-check → farm_sites → (수집 모드) 환경 변수 존재.
+    순서: 운영 연결 변수 부재 확인 → 운영 조정 스키마 → 단계별 기동 시 검사 → seed-check → farm_sites → (수집 모드) 환경 변수 존재.
     반환: 검사에서 읽은 operational dict (쓰기 기동 절차에서 재사용).
     """
+    # QUEUE_DSN·RAW_STORE_DSN이 있으면 운영 연결 위험 — 멈춘다 (2.1.1절, 개정 22)
+    for _var in ("QUEUE_DSN", "RAW_STORE_DSN"):
+        if os.environ.get(_var):
+            raise SystemExit(
+                f"실행 전 점검 실패: {_var} 가 설정돼 있습니다 — "
+                f"flowtest는 인메모리·로컬 구현만 씁니다 (2.1.1절)"
+            )
+
     import interpolation.main as ip
     import grading.main as gr
     import processor.main as pm
@@ -531,10 +539,16 @@ def main(argv=None):
     from common.config import database_url, load_definitions
     from common.repository import SqlRepository
     from common.queue import MemoryQueue
+    from common.raw_store import init_store, LocalDiskStore
 
     engine = create_engine(database_url())
     repo = SqlRepository(engine)
     defs = load_definitions()
+
+    # flowtest는 운영 S3/NATS에 연결하지 않는다 — 로컬 디스크·인메모리 구현을 명시적으로 주입 (2.1.1절, 개정 22)
+    _raw_store_path = os.environ.get("FT_RAW_STORE_PATH", "flowtest_raw_store")
+    init_store(LocalDiskStore(_raw_store_path))
+    log.info("[flowtest] raw store: LocalDiskStore(%s)", _raw_store_path)
 
     log.info("[flowtest] 실행 전 점검 시작")
     operational = _preflight(repo, defs, collect_mode=(args.mode == "collect"))

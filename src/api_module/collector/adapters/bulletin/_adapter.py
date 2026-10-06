@@ -1,4 +1,4 @@
-"""
+﻿"""
 적조정보 수집 어댑터 (I-3, I-14)
 - redtideList: 최근 30일 창 수집, 페이징 없음. 날짜 필터는 day_report 기준이라 등록 지연(최대 14일 관측)을
   덮도록 30일 (1.3·2.1절, 개정 18)
@@ -37,7 +37,7 @@ class BulletinCollectorAdapter:
         queue.publish(Message(
             topic="raw.fetched",
             payload={
-                "schema": "queue-v1",
+                "schema": "queue-v2",
                 "topic": "raw.fetched",
                 "raw_id": raw_id,
                 "api": API_ID,

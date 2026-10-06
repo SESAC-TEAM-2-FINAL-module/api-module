@@ -1,4 +1,4 @@
-"""
+﻿"""
 어장환경 해수면 femoSeaList 수집 어댑터 (I-5)
 참고: $SRC_IDW/src/collector.py::collect_fishery_sea() — 달력 연도 단위 호출
 - 달력 연도 단위: sdate=YYYY0101, edate=YYYY1231 (올해는 오늘까지)
@@ -40,7 +40,7 @@ class FisheryBackfillAdapter:
             queue.publish(Message(
                 topic="raw.fetched",
                 payload={
-                    "schema": "queue-v1",
+                    "schema": "queue-v2",
                     "topic": "raw.fetched",
                     "raw_id": raw_id,
                     "api": API_ID,

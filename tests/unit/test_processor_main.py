@@ -101,7 +101,7 @@ def test_process_applies_quality_with_definitions(monkeypatch):
 
 
 def test_obs_loaded_payload_matches_queue_contract(monkeypatch):
-    """obs.loaded payload가 contracts/queue/queue-v1.json을 통과하고 source는 수집 원천이다 (2.2절)"""
+    """obs.loaded payload가 contracts/queue/queue-v2.json을 통과하고 source는 수집 원천이다 (2.2절)"""
     import json
     import jsonschema
 
@@ -123,7 +123,7 @@ def test_obs_loaded_payload_matches_queue_contract(monkeypatch):
     q = MemoryQueue()
     pm._process_one("raw-1", "dtRecent", q)
     msg = q.drain("obs.loaded")[0]
-    contract = json.loads((Path(__file__).parents[2] / "contracts" / "queue" / "queue-v1.json").read_text(encoding="utf-8"))
+    contract = json.loads((Path(__file__).parents[2] / "contracts" / "queue" / "queue-v2.json").read_text(encoding="utf-8"))
     schema = {**contract["definitions"]["obs_loaded"], "definitions": contract["definitions"]}
     jsonschema.validate(msg.payload, schema)
     assert msg.payload["source"] == "tide"

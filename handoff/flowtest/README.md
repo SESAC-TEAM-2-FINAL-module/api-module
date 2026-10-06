@@ -30,7 +30,9 @@
 |---|---|---|
 | `DATABASE_URL` | 예 | 시험 DB 연결 문자열 — `postgresql+psycopg://<user>:<password>@<host>:5432/<db>` |
 | `OPERATIONAL_CONFIG_PATH` | 예 | 운영 조정 파일의 컨테이너 안 경로 |
-| `RAW_STORE_PATH` | 아니오 | 원문 저장 위치(기본 `/app/raw_data`). 볼륨을 붙일 경로 |
+| `FT_RAW_STORE_PATH` | 아니오 | 원문 저장 위치(기본 `flowtest_raw_store`). 볼륨을 붙일 경로 |
+| `QUEUE_DSN` | **금지** | 설정하면 실행기가 멈춥니다. 운영 NATS에 연결하지 않게 — 단계 간 큐는 프로세스 안의 메모리 큐를 씁니다 |
+| `RAW_STORE_DSN` | **금지** | 설정하면 실행기가 멈춥니다. 운영 S3에 쓰지 않게 — 원문은 `FT_RAW_STORE_PATH` 로컬 디스크에만 씁니다 |
 | `DTRECENT_URL`·`DTRECENT_KEY` | 수집 모드 | 조위관측소 요청주소·인증키 |
 | `NIFS_URL` | 수집 모드 | 수산과학원 요청주소 |
 | `NIFS_KEY_BULLETIN`·`NIFS_KEY_LINE`·`NIFS_KEY_FISHERY_SEA` | 수집 모드 | 적조·정선관측·어장환경 인증키 |
@@ -83,6 +85,7 @@ kubectl -n $NS scale deploy flowtest-loop --replicas=0   # 멈춤 (진행 중 �
 docker run --rm \
   --env-file flowtest.env \
   -e OPERATIONAL_CONFIG_PATH=/config/operational.yaml \
+  -e FT_RAW_STORE_PATH=/app/raw_data \
   -v /path/to/operational.yaml:/config/operational.yaml:ro \
   -v /path/to/raw_data:/app/raw_data \
   ryujaehee/aquasentinel-flowtest:2026-10-06 --mode collect --run once
@@ -96,6 +99,7 @@ docker run --rm \
 docker run -d --name flowtest \
   --env-file flowtest.env \
   -e OPERATIONAL_CONFIG_PATH=/config/operational.yaml \
+  -e FT_RAW_STORE_PATH=/app/raw_data \
   -e FT_TIDE_INTERVAL_SEC=600 \
   -e FT_BULLETIN_SEASON_INTERVAL_SEC=3600 -e FT_BULLETIN_OFFSEASON_INTERVAL_SEC=21600 \
   -e FT_LINE_INTERVAL_SEC=86400 -e FT_FISHERY_INTERVAL_SEC=604800 \
@@ -129,7 +133,7 @@ docker run --rm --env-file flowtest.env -e OPERATIONAL_CONFIG_PATH=/config/opera
 
 | 원천 | 한 번 실행 | 반복 실행(권장 주기) |
 |---|---|---|
-| 조위 | 약 27회 (9개소 × 약 3페이지) | 하루 약 3,900회 |
+| 조위 | 9회 (9개소 × 1페이지, 자정 경계 시 +9회) | 하루 약 1,320회 (자정 3회 구간 +9회) |
 | 적조 | 1회 | 하루 24회(시즌) / 4회(시즌 밖) |
 | 정선관측 | 1회 | 하루 1회 |
 | 어장환경 감시 | 1회 (게시가 바뀌었으면 그 해 전량 추가) | 주 1회 |
@@ -165,6 +169,6 @@ docker run --rm --env-file flowtest.env -e OPERATIONAL_CONFIG_PATH=/config/opera
 
 ## 8. 알려진 한계
 
-- **조위 여러 페이지 합치기** — 한 관측소 응답이 여러 페이지면 합쳐서 한 원문으로 보관합니다. 뒤 페이지가 실패하면 상태가 정상으로 남을 수 있습니다(다음 단계에서 고칩니다)
-- **큐·원문 저장소가 운영 구조와 다름** — 재전달·동시 실행·확장은 이 실행기로 확인되지 않습니다
+- **큐·원문 저장소가 운영 구조와 다름** — 단계 사이를 메모리 큐로 잇고 원문을 로컬 디스크에 둡니다. 재전달·동시 실행·확장은 이 실행기로 확인되지 않습니다
+- **보충 원문(자정 경계)** — KST `[00:00, 00:30)` 실행 시 조위 어제분을 추가로 받아 저장하지만, `obs.loaded`를 내지 않으므로 처리 연쇄는 시작되지 않습니다
 - 오류 처리 보강은 다음 단계 범위입니다

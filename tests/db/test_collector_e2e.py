@@ -7,6 +7,7 @@ collector.main(워크로드) → 원문 저장 → raw.fetched(계약 queue-v1) 
 from __future__ import annotations
 
 import json
+import time
 from datetime import date
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from .conftest import count_rows
 
 _ROOT = Path(__file__).parents[2]
 _FIX = _ROOT / "fixtures" / "raw"
-_CONTRACT = json.loads((_ROOT / "contracts" / "queue" / "queue-v1.json").read_text("utf-8"))
+_CONTRACT = json.loads((_ROOT / "contracts" / "queue" / "queue-v2.json").read_text("utf-8"))
 
 
 def _body(glob: str) -> str:
@@ -28,8 +29,11 @@ def _body(glob: str) -> str:
 
 
 def _ok(body: str) -> dict:
+    # _fetched_ms는 실제 fetch()가 붙이는 밀리초 타임스탬프 — 같은 초라도 키가 겹치지 않게 (2.3절, 개정 22)
     return {"url": "https://example.invalid/", "params": {"key": "***"}, "http_status": 200,
-            "final_url": None, "fetched_at": "2026-09-20T00:00:00", "body": body, "error": None}
+            "final_url": None, "fetched_at": "2026-09-20T00:00:00",
+            "_fetched_ms": time.time_ns() // 1_000_000,
+            "body": body, "error": None}
 
 
 @pytest.fixture()
@@ -79,7 +83,6 @@ def collectors(monkeypatch, tide):
     monkeypatch.setattr(ct, "fetch", tide_fetch)
     for mod in (cb, cl, cf, cw):
         monkeypatch.setattr(mod, "fetch", nifs_fetch)
-    monkeypatch.setattr(ct.time, "sleep", lambda s: None)
     return state
 
 

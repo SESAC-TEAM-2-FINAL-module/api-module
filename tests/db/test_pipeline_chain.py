@@ -70,7 +70,7 @@ def test_L6_L7_chain_from_raw_to_result_tables(processor_up, raw_store, schema_e
     assert wt[0]["value"] is not None                                              # 영역 판정과 값 저장은 별개
 
     # evaluation — 수온 grade.done (grading.handle_interp_done이 낸 것과 같은 형태로)
-    ev.handle_grade_done({"schema": "queue-v1", "topic": "grade.done", "grade_run_id": "chain", "axis": "water_temp",
+    ev.handle_grade_done({"schema": "queue-v2", "topic": "grade.done", "grade_run_id": "chain", "axis": "water_temp",
                           "farm_ids": ["syn_gam_001"]}, repo, q, op)
     status = _rows(schema_engine, "SELECT * FROM axis_status WHERE farm_id = 'syn_gam_001' AND axis = 'water_temp'")
     assert len(status) == 1
@@ -89,7 +89,7 @@ def test_L6_grade_done_from_obs_loaded_matches_contract(processor_up, raw_store,
     q, *_ = _run_to_grading(pm, repo, raw_store, schema_engine, tide)
     msgs = q.drain("grade.done")
     assert msgs
-    contract = json.loads((Path(__file__).parents[2] / "contracts" / "queue" / "queue-v1.json").read_text("utf-8"))
+    contract = json.loads((Path(__file__).parents[2] / "contracts" / "queue" / "queue-v2.json").read_text("utf-8"))
     schema = {**contract["definitions"]["grade_done"], "definitions": contract["definitions"]}
     for m in msgs:
         assert m.payload["axis"] in AXIS_VALS
@@ -199,7 +199,7 @@ def test_farm_area_published_and_season_applied(processor_up, schema_engine, far
     _, repo = processor_up
     load_seeds(repo)
     op = yaml.safe_load((Path(__file__).parents[2] / "config" / "operational.initial.yaml").read_text("utf-8"))
-    payload = {"schema": "queue-v1", "topic": "grade.done", "grade_run_id": "t", "axis": "red_tide",
+    payload = {"schema": "queue-v2", "topic": "grade.done", "grade_run_id": "t", "axis": "red_tide",
                "farm_ids": ["syn_gam_001"]}
 
     monkeypatch.setattr(ev, "_now_utc", lambda: datetime(2026, 11, 15, 0, 0, 0))   # 계절 [5..10] 밖
@@ -262,7 +262,7 @@ def test_all_chain_messages_match_queue_contract(processor_up, raw_store, schema
         ev.handle_grade_done(m.payload, repo, q, op)
     sent += q.drain("result.updated")
 
-    contract = json.loads((Path(__file__).parents[2] / "contracts" / "queue" / "queue-v1.json").read_text("utf-8"))
+    contract = json.loads((Path(__file__).parents[2] / "contracts" / "queue" / "queue-v2.json").read_text("utf-8"))
     topics = {m.topic for m in sent}
     assert {"obs.loaded", "interp.done", "grade.done", "result.updated"} <= topics
     for m in sent:

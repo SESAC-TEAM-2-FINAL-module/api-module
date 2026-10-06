@@ -1,4 +1,4 @@
-"""
+﻿"""
 정선해양관측 sooList 수집 어댑터 (I-4)
 참고: $SRC_IDW/src/collector.py::collect_line_survey() — 1년 창 1회 호출
 - 페이징 없음: pageNo 파라미터를 쓰지 않는다 — 한 번 호출하면 전체가 온다
@@ -40,7 +40,7 @@ class LineCollectorAdapter:
         queue.publish(Message(
             topic="raw.fetched",
             payload={
-                "schema": "queue-v1",
+                "schema": "queue-v2",
                 "topic": "raw.fetched",
                 "raw_id": raw_id,
                 "api": API_ID,

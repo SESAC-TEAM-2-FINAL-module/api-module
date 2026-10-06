@@ -49,7 +49,7 @@ CONSUMERS = [
 ]
 
 
-@pytest.mark.parametrize("schema", [None, "queue-v0", "queue-v2"])
+@pytest.mark.parametrize("schema", [None, "queue-v0", "queue-v1"])
 @pytest.mark.parametrize("consumer,payload", CONSUMERS, ids=[c for c, _ in CONSUMERS])
 def test_other_contract_version_is_not_processed(consumer, payload, schema, monkeypatch):
     repo = _OnlyEventsRepo()

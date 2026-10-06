@@ -1,4 +1,4 @@
-"""
+﻿"""
 어장환경 해수면 게시 감시 (I-5)
 신규 코드: 검증 코드 없음 (SKILL.md ④)
 - 주 1회 올해 창 건수(사전 읽기)를 직전 감시 원문 메타 건수와 비교
@@ -49,7 +49,7 @@ class FisheryWatchAdapter:
             queue.publish(Message(
                 topic="raw.fetched",
                 payload={
-                    "schema": "queue-v1",
+                    "schema": "queue-v2",
                     "topic": "raw.fetched",
                     "raw_id": raw_id,
                     "api": API_ID_WATCH,
@@ -73,7 +73,7 @@ class FisheryWatchAdapter:
         queue.publish(Message(
             topic="raw.fetched",
             payload={
-                "schema": "queue-v1",
+                "schema": "queue-v2",
                 "topic": "raw.fetched",
                 "raw_id": raw_id,
                 "api": API_ID_WATCH,
@@ -97,7 +97,7 @@ class FisheryWatchAdapter:
             queue.publish(Message(
                 topic="raw.fetched",
                 payload={
-                    "schema": "queue-v1",
+                    "schema": "queue-v2",
                     "topic": "raw.fetched",
                     "raw_id": full_raw_id,
                     "api": API_ID,

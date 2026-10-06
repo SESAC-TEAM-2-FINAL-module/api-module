@@ -69,10 +69,22 @@ def test_processor_manifest_commands_parse(monkeypatch):
     import runpy
     import sys
     import processor.main as pm
+    import common.queue as cq
     seen = []
     monkeypatch.setattr(pm, "_load_adapters", lambda: None)
     monkeypatch.setattr(pm, "startup", lambda *a, **k: None)
     monkeypatch.setattr(pm, "reprocess_range", lambda a, b, queue=None: seen.append((a, b)) or 0)
+
+    class _FakeNats:
+        @classmethod
+        def from_env(cls, **kwargs):
+            return cls()
+
+        def run(self, handler):
+            pass
+
+    monkeypatch.setattr(cq, "NatsQueue", _FakeNats)
+
     for args in _by_module("processor.main"):
         if args[:1] == ["reprocess"]:
             args = args + ["--raw-id-from", "1", "--raw-id-to", "2"]   # 매니페스트 주석: 인프라가 설정

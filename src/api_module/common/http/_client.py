@@ -9,6 +9,10 @@ import time
 import urllib.parse
 from datetime import datetime, timezone
 
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
 import httpx
 
 _CONNECT_TIMEOUT = 10
@@ -57,6 +61,7 @@ def fetch(
         "http_status": None,
         "final_url": None,
         "fetched_at": None,
+        "_fetched_ms": _now_ms(),  # 밀리초 — 같은 초 키 충돌 해소 (2.3절, 개정 22)
         "body": None,
         "error": None,
     }

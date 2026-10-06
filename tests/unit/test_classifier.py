@@ -53,6 +53,29 @@ def test_classify_unknown():
     assert _classify("99") == "API_ERROR_99"
 
 
+# --- T5: 개정 22 결과 코드 추가 분류 (7.11절 T5) ---
+
+def test_classify_21():
+    """21 → KEY_ERROR (3.2절, 개정 22)"""
+    assert _classify("21") == "KEY_ERROR"
+
+def test_classify_31():
+    """31 → KEY_ERROR (3.2절, 개정 22)"""
+    assert _classify("31") == "KEY_ERROR"
+
+def test_classify_33():
+    """33 → KEY_ERROR (3.2절, 개정 22)"""
+    assert _classify("33") == "KEY_ERROR"
+
+def test_classify_40():
+    """40 → SUSPENDED (3.2절, 개정 22)"""
+    assert _classify("40") == "SUSPENDED"
+
+def test_classify_04():
+    """04 → API_ERROR_04 — _CODE_MAP에 없으면 API_ERROR_{raw} (3.2절)"""
+    assert _classify("04") == "API_ERROR_04"
+
+
 # --- 음성 입력 N1~N7 ---
 
 def test_N1_unknown_schema():
