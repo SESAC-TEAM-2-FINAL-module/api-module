@@ -80,6 +80,6 @@ risk_index:
   levels: <미결>
 
 contracts:
-  queue: queue-v1
+  queue: queue-v2           # 개정 22 — interp.done.error_p95 널 허용(점검 C4)
   tables: tables-v3          # 개정 20 — risk_index_factors·risk_index_levels·AXIS_VALS red_tide_risk 추가
   operational: operational-v1

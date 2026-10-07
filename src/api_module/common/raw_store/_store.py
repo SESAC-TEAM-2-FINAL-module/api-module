@@ -75,14 +75,26 @@ class S3Store(RawStore):
     """
 
     def __init__(self, bucket: str, prefix: str = "", endpoint_url: str | None = None) -> None:
+        import logging
         import boto3
         from botocore.config import Config
+        # botocore는 DEBUG에서 요청 헤더(Credential=<접근 키 ID>/…)를 남긴다 — 로그 수준을 올려도 계정이 새지 않게 (7.11 O5)
+        _boto_log = logging.getLogger("botocore")
+        if _boto_log.getEffectiveLevel() < logging.INFO:
+            _boto_log.setLevel(logging.INFO)
         kwargs: dict = {"config": Config(retries={"max_attempts": 3, "mode": "standard"})}
         if endpoint_url:
             kwargs["endpoint_url"] = endpoint_url
         self._s3 = boto3.client("s3", **kwargs)
         self._bucket = bucket
         self._prefix = prefix.rstrip("/")
+
+    def check(self) -> None:
+        """기동 시 버킷 접근 1회 확인 — 실패하면 멈춘다 (2.3절, 개정 22)"""
+        try:
+            self._s3.head_bucket(Bucket=self._bucket)
+        except Exception as exc:
+            raise SystemExit(f"원문 저장소(S3) 접근 실패 — 기동 멈춤: {type(exc).__name__}")
 
     def _full_key(self, key: str) -> str:
         return f"{self._prefix}/{key}" if self._prefix else key
@@ -144,6 +156,7 @@ class S3Store(RawStore):
 
 
 _store: RawStore | None = None
+_image: str = "unknown"
 
 
 def _get_store() -> RawStore:
@@ -169,10 +182,22 @@ def _get_store() -> RawStore:
     return _store
 
 
-def init_store(store: RawStore) -> None:
-    """테스트·flowtest용 — 구현체를 직접 주입한다."""
+def init_store(store: RawStore | None) -> None:
+    """테스트·flowtest용 — 구현체를 직접 주입한다(None이면 비운다). 운영 진입점은 open_raw_store()"""
     global _store
     _store = store
+
+
+def open_raw_store(image: str) -> RawStore:
+    """운영 진입점 `main()` 층에서 부른다 — `RAW_STORE_DSN`(s3://)이 없거나 버킷에 닿지 않으면 멈춘다.
+    로컬 디스크로 대체하지 않는다. `RAW_STORE_PATH`는 읽지 않는다 (2.3절, 개정 22)"""
+    global _image
+    _image = image
+    store = _get_store()
+    check = getattr(store, "check", None)
+    if check is not None:
+        check()
+    return store
 
 
 def save_raw(api: str, tag: str, fetch_result: dict) -> str:
@@ -180,25 +205,39 @@ def save_raw(api: str, tag: str, fetch_result: dict) -> str:
     fetched_at = fetch_result.get("fetched_at") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     epoch_ms = fetch_result.get("_fetched_ms")
     key = _raw_key(api, tag, fetched_at, epoch_ms=epoch_ms)
-    from common.metrics import raw_store_errors_total
     try:
         _get_store().put(key, fetch_result)
-    except FileExistsError:
-        # 같은 키는 쓰지 않는다 — raw.fetched 발행도 하지 않는다 (2.3절, 개정 22)
-        raise
     except Exception:
-        raw_store_errors_total.labels(api=api).inc()
+        # 같은 키 충돌(FileExistsError)도 오류다 — 덮어쓰지 않고, raw.fetched도 내지 않는다 (2.3절, 개정 22)
+        _count_error("put")
         raise
     return key
 
 
+def _count_error(op: str) -> None:
+    from common.metrics import raw_store_errors_total
+    raw_store_errors_total.labels(op=op, image=_image).inc()
+
+
 def get_raw_meta(raw_id: str) -> dict | None:
-    return _get_store().get_meta(raw_id)
+    try:
+        return _get_store().get_meta(raw_id)
+    except Exception:
+        _count_error("get")
+        raise
 
 
 def get_raw_body(raw_id: str) -> str | None:
-    return _get_store().get_body(raw_id)
+    try:
+        return _get_store().get_body(raw_id)
+    except Exception:
+        _count_error("get")
+        raise
 
 
 def list_raw_keys(prefix: str) -> list[str]:
-    return _get_store().list_keys(prefix)
+    try:
+        return _get_store().list_keys(prefix)
+    except Exception:
+        _count_error("list")
+        raise

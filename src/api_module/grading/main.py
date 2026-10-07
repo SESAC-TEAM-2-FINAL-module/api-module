@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import sys
-import uuid
 from datetime import date, datetime, timezone
 
 from common.clock import kst_today
@@ -17,6 +16,7 @@ from common.contract_check import QUEUE_CONTRACT, accept_message
 from common.farm_sites import load_farm_sites, FarmSite
 from common.idw_inputs import filter_stations
 from common.queue import Message, Queue
+from common.run_ids import run_id_from
 
 from ._chlorophyll import SURFACE_LAYER as CHL_SURFACE_LAYER, find_chlorophyll_obs
 from ._do import find_do_obs
@@ -350,7 +350,7 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
     # 갱신한 축마다 grade.done 하나 — evaluation은 axis 하나씩 판정한다 (2.2절)
     # grade_run_id: obs.loaded load_id에서 결정적으로 생성 — UUID v5 (재전달 멱등, 개정 22)
     load_id = payload.get("load_id", "")
-    grade_run_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"obs.loaded:{load_id}"))
+    grade_run_id = run_id_from(f"obs.loaded:{load_id}")
     by_axis: dict[str, list[str]] = {}
     for r in readings:
         by_axis.setdefault(r["axis"], []).append(r["farm_id"])
@@ -481,7 +481,7 @@ def handle_interp_done(payload: dict, repo, queue: Queue, defs: dict) -> None:
             ri_farm_ids = _write_risk_index(tr, farm_ids, defs, now)
 
     # grade_run_id: interp.done run_id에서 결정적으로 생성 — UUID v5 (재전달 멱등, 개정 22)
-    grade_run_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"interp.done:{run_id}"))
+    grade_run_id = run_id_from(f"interp.done:{run_id}")
     _publish_grade_done(queue, grade_run_id, "water_temp", farm_ids)
     if ri_farm_ids:
         _publish_grade_done(queue, grade_run_id, "red_tide_risk", ri_farm_ids)
@@ -565,7 +565,7 @@ def _compute_risk_for_farm(
 
 
 def _publish_grade_done(queue: Queue, grade_run_id: str, axis: str, farm_ids: list[str]) -> None:
-    """grade.done — 계약 queue-v1 grade_done (schema·topic·grade_run_id·axis·farm_ids)"""
+    """grade.done — 계약 queue-v2 grade_done (schema·topic·grade_run_id·axis·farm_ids)"""
     queue.publish(Message(
         topic="grade.done",
         payload={
@@ -632,27 +632,15 @@ def main(argv: list[str] | None = None) -> None:
     repo = SqlRepository(engine)
     defs = startup_checks(repo)  # defs는 startup_checks 내부에서 로드 (원래 순서)
 
-    # QUEUE_DSN 있으면 NatsQueue, 없으면 멈춘다 (2.2절, 개정 22 — MemoryQueue 폴백 금지)
-    # grading은 obs.loaded와 interp.done 두 주제를 소비한다 — 컨슈머마다 NatsQueue 인스턴스 (개정 22)
-    from common.queue import NatsQueue
-    _nq_obs = NatsQueue.from_env(
-        consumer_name="grading-obs-loaded",
-        subscribed_topic="obs.loaded",
-        repo=repo,
-    )
-    _nq_interp = NatsQueue.from_env(
-        consumer_name="grading-interp-done",
-        subscribed_topic="interp.done",
-        repo=repo,
-    )
-    import threading
-    _t = threading.Thread(
-        target=_nq_interp.run,
-        args=(lambda msg: handle_interp_done(msg.payload, repo, _nq_interp, defs),),
-        daemon=True,
-    )
-    _t.start()
-    _nq_obs.run(lambda msg: handle_obs_loaded(msg.payload, repo, _nq_obs, defs))
+    # obs.loaded·interp.done 두 컨슈머를 한 큐에서 돌아가며 받는다 — QUEUE_DSN 없으면 멈춘다 (2.2절, 개정 22)
+    from common.queue import open_queue
+    q = open_queue("grading", repo)
+    try:
+        q.subscribe("obs.loaded", lambda msg: handle_obs_loaded(msg.payload, repo, q, defs))
+        q.subscribe("interp.done", lambda msg: handle_interp_done(msg.payload, repo, q, defs))
+        q.run()
+    finally:
+        q.close()
 
 
 if __name__ == "__main__":

@@ -10,8 +10,8 @@ from typing import Protocol
 
 from common.classifier import ParsedResponse, parse
 from common.config import load_definitions, load_operational, operational_hash
-from common.contract_check import accept_message
-from common.queue import Queue, Message, MemoryQueue
+from common.contract_check import QUEUE_CONTRACT, accept_message
+from common.queue import Queue, Message
 from common.sources import source_of
 from common.raw_store import get_raw_body, get_raw_meta
 from common.metrics import (processor_parse_failure_total, operational_config_info,
@@ -97,10 +97,11 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
 
 
-def _is_supplement(raw_id: str) -> bool:
-    """보충 원문 판별 — tag가 _y로 끝나면 True (1.2절, 개정 22). tag는 storage_key 파일명 {epoch_ms}_{tag}.json에서 추출"""
+def _is_supplement(raw_id: str, api: str) -> bool:
+    """조위 보충 원문(어제분) 판별 — 조위 원문의 tag가 `_y`로 끝나면 True (1.2절, 개정 22).
+    tag는 storage_key 파일명 {epoch_ms}_{tag}.json에서 추출. 다른 원천의 tag는 보지 않는다"""
     tag = _storage_tag(raw_id)
-    return tag is not None and tag.endswith("_y")
+    return api == "dtRecent" and tag is not None and tag.endswith("_y")
 
 
 def _process_one(raw_id: str, api: str, queue: Queue) -> None:
@@ -144,7 +145,7 @@ def _process_one(raw_id: str, api: str, queue: Queue) -> None:
         rows = apply_quality(rows, api, _CONFIG["definitions"], operational=_CONFIG["operational"])
 
     # 보충 원문(_y): 관측·색인 적재까지만 — obs.loaded 미발행, adapter_health 미갱신 (1.2절, 개정 22)
-    supplement = _is_supplement(raw_id)
+    supplement = _is_supplement(raw_id, api)
 
     # 적재 — 한 트랜잭션. 예외가 나면 알림을 내지 않는다 (I-12)
     result = load(
@@ -168,7 +169,7 @@ def _process_one(raw_id: str, api: str, queue: Queue) -> None:
     queue.publish(Message(
         topic="obs.loaded",
         payload={
-            "schema": "queue-v2",
+            "schema": QUEUE_CONTRACT,
             "topic": "obs.loaded",
             "load_id": f"{raw_id}::{PARSER_VERSION}",
             "api": api,
@@ -191,9 +192,8 @@ def _watch_meta(api: str, raw_id: str) -> dict:
     return {"target_year": int(year) if year and year.isdigit() else None}
 
 
-def process(raw_id: str, api: str, queue: Queue | None = None) -> None:
-    if queue is None:
-        queue = MemoryQueue()
+def process(raw_id: str, api: str, queue: Queue) -> None:
+    """원문 한 건 처리 — 큐는 부르는 쪽이 넘긴다(운영은 open_queue, 테스트는 MemoryQueue — 2.2절, 개정 22)"""
     _process_one(raw_id, api, queue)
 
 
@@ -206,14 +206,12 @@ def handle_raw_fetched(payload: dict, queue: Queue) -> None:
     _process_one(payload["raw_id"], payload["api"], queue)
 
 
-def reprocess(raw_ids: list[str], api: str, queue: Queue | None = None) -> None:
-    if queue is None:
-        queue = MemoryQueue()
+def reprocess(raw_ids: list[str], api: str, queue: Queue) -> None:
     for raw_id in raw_ids:
         _process_one(raw_id, api, queue)
 
 
-def reprocess_range(id_from: int, id_to: int, queue: Queue | None = None) -> int:
+def reprocess_range(id_from: int, id_to: int, queue: Queue) -> int:
     """
     원문 ID 범위 재처리 (2.1절, 개정 15) — 원문 ID = raw_index.id(5.3절, 결정 D1), 양끝 포함.
     색인 행의 api·storage_key로 다시 처리한다. 반환: 처리한 원문 수
@@ -222,8 +220,6 @@ def reprocess_range(id_from: int, id_to: int, queue: Queue | None = None) -> int
         raise RuntimeError("processor.startup() 전에 처리 호출 — 설정 미주입")
     if id_from > id_to:
         raise SystemExit(f"재처리 범위가 거꾸로다: {id_from} > {id_to}")
-    if queue is None:
-        queue = MemoryQueue()
     rows = _CONFIG["repo"].get_raw_index_range(id_from, id_to)
     for r in rows:
         _process_one(r["storage_key"], r["api"], queue)
@@ -285,22 +281,28 @@ if __name__ == "__main__":
         print(f"[seed-check] 차이 {len(_diffs)}건")
         sys.exit(1 if _diffs else 0)
     _m._load_adapters()
-    _m.startup()
-    if args.cmd == "process":
-        _m.process(args.raw_id, args.api)
-    elif args.cmd == "reprocess":
-        n = _m.reprocess_range(args.raw_id_from, args.raw_id_to)
-        print(f"[processor] 재처리 {n}건 (raw_index.id {args.raw_id_from}~{args.raw_id_to})", file=sys.stderr)
-    elif args.cmd == "completeness-check":
-        _q = MemoryQueue()
-        _q.subscribe("completeness.collected", lambda msg: _m.completeness_check(msg.payload))
-    else:
-        # 명령 없음 = raw.fetched 컨슈머 (handoff/k8s/processor.yaml Deployment)
-        # QUEUE_DSN 있으면 NatsQueue, 없으면 멈춘다 (2.2절, 개정 22 — MemoryQueue 폴백 금지)
-        from common.queue import NatsQueue
-        _nq = NatsQueue.from_env(
-            consumer_name="processor-raw-fetched",
-            subscribed_topic="raw.fetched",
-            repo=_m._CONFIG.get("repo"),
-        )
-        _nq.run(lambda msg: _m.handle_raw_fetched(msg.payload, _nq))
+    # 읽기 전용 검사(판정 정의·운영 조정 스키마·DB 스키마) → 원문 저장소·큐 연결 → 쓰기가 있는 startup() (개정 22)
+    from common.config import load_definitions as _ld, load_operational as _lo
+    from common.queue import open_queue
+    from common.raw_store import open_raw_store
+    _defs, _op, _repo = _ld(), _lo(), _m._repository_from_env()
+    _m.schema_checks(_repo)
+    open_raw_store("processor")
+    _workload = "completeness-check" if args.cmd == "completeness-check" else "processor"
+    _q = open_queue(_workload, _repo)
+    try:
+        _m.startup(_defs, _op, _repo)
+        if args.cmd == "process":
+            _m.process(args.raw_id, args.api, _q)
+        elif args.cmd == "reprocess":
+            n = _m.reprocess_range(args.raw_id_from, args.raw_id_to, _q)
+            print(f"[processor] 재처리 {n}건 (raw_index.id {args.raw_id_from}~{args.raw_id_to})", file=sys.stderr)
+        elif args.cmd == "completeness-check":
+            _q.subscribe("completeness.collected", lambda msg: _m.completeness_check(msg.payload))
+            _q.run()
+        else:
+            # 명령 없음 = raw.fetched 컨슈머 (Deployment) — 메시지를 기다리며 계속 돈다 (점검 C17)
+            _q.subscribe("raw.fetched", lambda msg: _m.handle_raw_fetched(msg.payload, _q))
+            _q.run()
+    finally:
+        _q.close()

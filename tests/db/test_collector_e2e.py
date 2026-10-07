@@ -7,6 +7,7 @@ collector.main(워크로드) → 원문 저장 → raw.fetched(계약 queue-v1) 
 from __future__ import annotations
 
 import json
+import sys
 import time
 from datetime import date
 from pathlib import Path
@@ -28,11 +29,15 @@ def _body(glob: str) -> str:
     return json.loads(next(_FIX.glob(glob)).read_text("utf-8"))["body"]
 
 
+def _now_ms() -> int:
+    return time.time_ns() // 1_000_000
+
+
 def _ok(body: str) -> dict:
     # _fetched_ms는 실제 fetch()가 붙이는 밀리초 타임스탬프 — 같은 초라도 키가 겹치지 않게 (2.3절, 개정 22)
     return {"url": "https://example.invalid/", "params": {"key": "***"}, "http_status": 200,
             "final_url": None, "fetched_at": "2026-09-20T00:00:00",
-            "_fetched_ms": time.time_ns() // 1_000_000,
+            "_fetched_ms": _now_ms(),
             "body": body, "error": None}
 
 
@@ -241,3 +246,60 @@ def test_fishery_backfill_failure_stops_without_counting_zero(processor_up, raw_
         cm.main("fishery-backfill", q)
     msgs = q.drain("raw.fetched")
     assert len(msgs) == 1                                   # 첫 연도 실패 원문 하나 — 더 거슬러 가지 않는다
+
+
+
+# ── 7.11 O1 — E3를 S3 원문 저장소로 한 번 더: 같은 DB 행 (개정 22) ──────────────
+
+# 실행마다 달라지는 처리 시각만 뺀다. 자동 증가 ID를 가리키는 raw_id는 원문 키로 바꿔 비교한다 —
+# 원문 키는 두 실행에서 같게 고정한다(검수 L2)
+_O1_SKIP = {"id", "processed_at_utc", "last_success_utc", "occurred_at_utc", "first_seen_utc", "last_seen_utc"}
+
+
+def _snapshot(engine) -> dict:
+    from common.repository.tables import metadata
+    with engine.connect() as conn:
+        key_of = dict(conn.execute(text("SELECT id, storage_key FROM raw_index")).all())
+
+    def norm(row: dict) -> dict:
+        if "raw_id" in row:
+            row["raw_id"] = key_of.get(row["raw_id"], row["raw_id"])
+        if isinstance(row.get("detail"), dict) and "raw_id" in row["detail"]:
+            row["detail"] = {**row["detail"], "raw_id": key_of.get(row["detail"]["raw_id"])}
+        return row
+
+    out = {}
+    with engine.connect() as conn:
+        for tbl in metadata.sorted_tables:
+            cols = [c for c in tbl.columns if c.name not in _O1_SKIP]
+            rows = conn.execute(tbl.select().with_only_columns(*cols)).mappings().all()
+            if rows:
+                out[tbl.name] = sorted(json.dumps(norm(dict(r)), default=str, sort_keys=True) for r in rows)
+    return out
+
+
+@pytest.mark.parametrize("workload", ["tide", "bulletin"])
+def test_o1_e3_same_rows_on_s3(processor_up, schema_engine, collectors, s3_env, monkeypatch, tmp_path, workload):
+    import itertools
+    import common.raw_store._store as store_mod
+    from common.config import load_definitions
+    from common.repository.tables import metadata
+    pm, repo = processor_up
+    op = yaml.safe_load((_ROOT / "config" / "operational.initial.yaml").read_text("utf-8"))
+    mod = sys.modules[__name__]
+
+    def run(store) -> dict:
+        seq = itertools.count(1_791_000_000_000)
+        monkeypatch.setattr(mod, "_now_ms", lambda: next(seq))
+        monkeypatch.setattr(store_mod, "_store", store)
+        _process(pm, _run(workload))
+        snap = _snapshot(schema_engine)
+        with schema_engine.begin() as conn:
+            for tbl in reversed(metadata.sorted_tables):
+                conn.execute(tbl.delete())
+        pm.startup(definitions=load_definitions(), operational=op, repo=repo)
+        return snap
+
+    local = run(store_mod.LocalDiskStore(str(tmp_path / "raw")))
+    s3 = run(store_mod.S3Store(s3_env["bucket"], endpoint_url=s3_env["endpoint"]))
+    assert "raw_index" in local and local == s3

@@ -16,6 +16,7 @@ from common.config import load_env_config
 from common.http import fetch
 from common.queue import Queue, Message
 from common.raw_store import get_raw_body, get_raw_meta, list_raw_keys, save_raw
+from common.contract_check import QUEUE_CONTRACT
 
 from collector.main import register
 
@@ -49,7 +50,7 @@ class FisheryWatchAdapter:
             queue.publish(Message(
                 topic="raw.fetched",
                 payload={
-                    "schema": "queue-v2",
+                    "schema": QUEUE_CONTRACT,
                     "topic": "raw.fetched",
                     "raw_id": raw_id,
                     "api": API_ID_WATCH,
@@ -73,7 +74,7 @@ class FisheryWatchAdapter:
         queue.publish(Message(
             topic="raw.fetched",
             payload={
-                "schema": "queue-v2",
+                "schema": QUEUE_CONTRACT,
                 "topic": "raw.fetched",
                 "raw_id": raw_id,
                 "api": API_ID_WATCH,
@@ -97,7 +98,7 @@ class FisheryWatchAdapter:
             queue.publish(Message(
                 topic="raw.fetched",
                 payload={
-                    "schema": "queue-v2",
+                    "schema": QUEUE_CONTRACT,
                     "topic": "raw.fetched",
                     "raw_id": full_raw_id,
                     "api": API_ID,

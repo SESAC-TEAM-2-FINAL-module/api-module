@@ -18,30 +18,30 @@ dependencies = [
 # 한 단계의 라이브러리 갱신이 다른 이미지에 번지지 않게 한다
 collector = [
     "httpx[http2]",
-    "boto3",         # S3 원문 저장소 (2.3절, 개정 22)
-    "nats-py",       # NATS JetStream 단계 간 알림 (2.2절, 개정 22)
+    "boto3>=1.34",   # S3 원문 저장소 (2.3절, 개정 22)
+    "nats-py>=2.6",  # NATS JetStream 단계 간 알림 (2.2절, 개정 22)
 ]
 processor = [
     "SQLAlchemy>=2.0",   # DB 접근 계층 (common/repository/, 5.4절)
     "lxml",
     "jsonschema",   # 운영 조정 기동 시 스키마 검사 (2.0.6절)
-    "boto3",         # S3 원문 저장소 읽기 (2.3절, 개정 22)
-    "nats-py",       # NATS JetStream 단계 간 알림 (2.2절, 개정 22)
+    "boto3>=1.34",   # S3 원문 저장소 읽기 (2.3절, 개정 22)
+    "nats-py>=2.6",  # NATS JetStream 단계 간 알림 (2.2절, 개정 22)
 ]
 interpolation = [
     "SQLAlchemy>=2.0",
     "numpy",
     "scipy",
-    "nats-py",       # NATS JetStream 단계 간 알림 (2.2절, 개정 22)
+    "nats-py>=2.6",  # NATS JetStream 단계 간 알림 (2.2절, 개정 22)
 ]
 evaluation = [
     "SQLAlchemy>=2.0",
     "jsonschema",   # 운영 조정 기동 시 스키마 검사·gate (2.0.6절)
-    "nats-py",       # NATS JetStream 단계 간 알림 (2.2절, 개정 22)
+    "nats-py>=2.6",  # NATS JetStream 단계 간 알림 (2.2절, 개정 22)
 ]
 grading = [
     "SQLAlchemy>=2.0",
-    "nats-py",       # NATS JetStream 단계 간 알림 (2.2절, 개정 22)
+    "nats-py>=2.6",  # NATS JetStream 단계 간 알림 (2.2절, 개정 22)
 ]
 # flowtest: 전 단계 의존성 합집합 — collector·processor·interpolation·grading·evaluation (2.1.1절, 개정 21)
 flowtest = [
@@ -51,7 +51,7 @@ flowtest = [
     "jsonschema",
     "numpy",
     "scipy",
-    "boto3",         # S3 원문 저장소 — collector·processor 의존성 합집합 (2.3절, 개정 22)
+    "boto3>=1.34",   # S3 원문 저장소 — collector·processor 의존성 합집합 (2.3절, 개정 22)
 ]
 # collector: DB에 쓰지 않는다 (2.3절, 결정 D1) — SQLAlchemy 없음
 

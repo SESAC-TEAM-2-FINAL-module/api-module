@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir \
     "tenacity" \
     "SQLAlchemy>=2.0" \
     "jsonschema" \
+    "nats-py>=2.6" \
     "psycopg[binary]>=3.1"
 
 # 공통 코드 (PYTHONPATH=/app/src/api_module 기준)
@@ -23,6 +24,9 @@ COPY src/api_module/evaluation/ /app/src/api_module/evaluation/
 
 # 판정 정의 — 이미지에 포함 (2.0.6절)
 COPY config/definitions.yaml /app/config/definitions.yaml
+
+# 큐 정의 — 스트림·컨슈머·Nats-Msg-Id 키 (2.2절, 개정 22). 기동 시 스트림·컨슈머를 이 정의로 멱등 생성
+COPY contracts/queue/jetstream.json /app/contracts/queue/jetstream.json
 
 # 운영 조정 게이트 픽스처 — 판정 재생용 합성 입력 (2.0.6절)
 COPY fixtures/synthetic/ /app/fixtures/synthetic/

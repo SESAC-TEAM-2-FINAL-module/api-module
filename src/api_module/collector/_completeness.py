@@ -15,6 +15,7 @@ from typing import Callable
 from common.clock import kst_today, split_by_month
 from common.queue import Message, Queue
 from common.raw_store import save_raw
+from common.contract_check import QUEUE_CONTRACT
 
 
 @dataclass(frozen=True)
@@ -57,7 +58,7 @@ def collect(
                       "raw_id": _save(f"cmp_{run.run_key}_part_{_ymd(ps)}_{_ymd(pe)}", ps, pe)})
 
     payload = {
-        "schema": "queue-v2", "topic": "completeness.collected",
+        "schema": QUEUE_CONTRACT, "topic": "completeness.collected",
         "run_key": run.run_key, "api": api_base,
         "window_start": _ymd(start), "window_end": _ymd(end),
         "single_raw_id": single, "parts": parts,

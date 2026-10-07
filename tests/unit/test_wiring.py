@@ -64,26 +64,46 @@ def test_collector_fishery_watch_module_is_runnable():
     assert 'if __name__ == "__main__":' in src
 
 
+def _fake_processor_connections(monkeypatch):
+    """processor `__main__`의 연결(판정 정의·운영 조정·DB·원문 저장소·큐)을 가짜로 — 명령 인자 해석만 본다.
+    진입점이 함수 안에서 `from common.queue import open_queue`로 가져오므로 모듈 속성 패치가 먹는다"""
+    import common.config as cc
+    import common.queue as cq
+    import common.raw_store as crs
+    import processor.main as pm
+    opened = []
+
+    class _FakeQueue(cq.MemoryQueue):
+        def __init__(self, workload):
+            super().__init__()
+            self.workload, self.ran, self.closed = workload, False, False
+            opened.append(self)
+
+        def run(self):
+            self.ran = True
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(pm, "_load_adapters", lambda: None)
+    monkeypatch.setattr(pm, "startup", lambda *a, **k: None)
+    monkeypatch.setattr(pm, "_repository_from_env", lambda: object())
+    monkeypatch.setattr(pm, "schema_checks", lambda repo: None)
+    monkeypatch.setattr(cc, "load_definitions", lambda *a, **k: {})
+    monkeypatch.setattr(cc, "load_operational", lambda *a, **k: {})
+    monkeypatch.setattr(crs, "open_raw_store", lambda image: None)
+    monkeypatch.setattr(cq, "open_queue", lambda workload, repo=None: _FakeQueue(workload))
+    return opened
+
+
 def test_processor_manifest_commands_parse(monkeypatch):
     """processor 매니페스트 명령(없음 / reprocess)이 진입점 인자로 해석된다"""
     import runpy
     import sys
     import processor.main as pm
-    import common.queue as cq
     seen = []
-    monkeypatch.setattr(pm, "_load_adapters", lambda: None)
-    monkeypatch.setattr(pm, "startup", lambda *a, **k: None)
-    monkeypatch.setattr(pm, "reprocess_range", lambda a, b, queue=None: seen.append((a, b)) or 0)
-
-    class _FakeNats:
-        @classmethod
-        def from_env(cls, **kwargs):
-            return cls()
-
-        def run(self, handler):
-            pass
-
-    monkeypatch.setattr(cq, "NatsQueue", _FakeNats)
+    opened = _fake_processor_connections(monkeypatch)
+    monkeypatch.setattr(pm, "reprocess_range", lambda a, b, queue: seen.append((a, b)) or 0)
 
     for args in _by_module("processor.main"):
         if args[:1] == ["reprocess"]:
@@ -91,6 +111,9 @@ def test_processor_manifest_commands_parse(monkeypatch):
         monkeypatch.setattr(sys, "argv", ["processor.main", *args])
         runpy.run_module("processor.main", run_name="__main__")
     assert seen == [(1, 2)]
+    assert opened and all(q.workload == "processor" and q.closed for q in opened)
+    consumers = [q for q in opened if q.ran]          # 명령 없음 = raw.fetched 컨슈머
+    assert consumers and all(set(q._handlers) == {"raw.fetched"} for q in consumers)
 
 
 @pytest.mark.parametrize("module,accepted", [
@@ -134,11 +157,13 @@ def test_completeness_check_command_parses(monkeypatch):
     """검사기 명령은 매니페스트가 아직 없어 E1이 못 본다 — 진입점 인자로 기동되는지 여기서 확인 (7.9 E7)"""
     import runpy
     import sys
-    import processor.main as pm
-    monkeypatch.setattr(pm, "_load_adapters", lambda: None)
-    monkeypatch.setattr(pm, "startup", lambda *a, **k: None)
+    opened = _fake_processor_connections(monkeypatch)
     monkeypatch.setattr(sys, "argv", ["processor.main", "completeness-check"])
     runpy.run_module("processor.main", run_name="__main__")
+    assert len(opened) == 1
+    q = opened[0]
+    assert q.workload == "completeness-check" and q.ran and q.closed
+    assert set(q._handlers) == {"completeness.collected"}
 
 
 

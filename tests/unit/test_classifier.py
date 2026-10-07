@@ -5,7 +5,11 @@ N1~N7: 음성 입력
 """
 import json
 import pytest
+from pathlib import Path
+
 from common.classifier import parse, _classify, ParsedResponse
+
+FIXTURES_DIR = Path(__file__).parents[2] / "fixtures" / "raw"
 
 
 # --- _classify 단위 ---
@@ -212,3 +216,18 @@ def test_unknown_format():
     pr = parse("HELLO WORLD")
     assert pr.parse_status == "PARSE_FAILURE"
     assert pr.format == "unknown"
+
+
+def test_T5_code_04_from_both_providers_raw_bodies():
+    """T5: `04`는 기관마다 뜻이 달라 공통 대응이 없다 — NIFS 실제 원문(I-13)·data.go.kr 형식 원문 모두 API_ERROR_04"""
+    nifs = json.loads(next((FIXTURES_DIR).glob("redtideList_i13_c5_*.json")).read_text("utf-8"))["body"]
+    datagokr = json.dumps({"response": {"header": {"resultCode": "04", "resultMsg": "HTTP ERROR"}, "body": {}}})
+    assert parse(nifs).parse_status == "API_ERROR_04"
+    assert parse(datagokr).parse_status == "API_ERROR_04"
+
+
+@pytest.mark.parametrize("code,status", [("21", "KEY_ERROR"), ("31", "KEY_ERROR"), ("33", "KEY_ERROR"),
+                                         ("40", "SUSPENDED"), ("41", "SUSPENDED")])
+def test_T5_datagokr_codes_from_raw_body(code, status):
+    body = json.dumps({"response": {"header": {"resultCode": code, "resultMsg": "x"}, "body": {}}})
+    assert parse(body).parse_status == status

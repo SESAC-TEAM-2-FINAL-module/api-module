@@ -9,7 +9,7 @@ import sys
 import time
 from typing import Protocol
 
-from common.queue import Queue, Message, MemoryQueue
+from common.queue import Queue, Message
 from common.metrics import collector_calls_total, collector_retry_total, collector_duration_seconds
 
 
@@ -47,9 +47,8 @@ def resolve(workload: str) -> list[CollectorAdapter]:
     return [_REGISTRY[a] for a in api_ids]
 
 
-def main(workload: str, queue: Queue | None = None) -> None:
-    if queue is None:
-        queue = MemoryQueue()
+def main(workload: str, queue: Queue) -> None:
+    """큐는 부르는 쪽이 넘긴다 — 운영은 `__main__`의 open_queue, 테스트·시험 실행기는 인메모리 (2.2절, 개정 22)"""
     adapters = resolve(workload)
     run = None
     if any(getattr(a, "uses_completeness_run", False) for a in adapters):
@@ -82,4 +81,12 @@ if __name__ == "__main__":
     p.add_argument("workload", help=f"워크로드: {', '.join(WORKLOADS)} (또는 api_id)")
     args = p.parse_args()
     _m._load_adapters()
-    _m.main(args.workload)
+    _m.resolve(args.workload)                    # 워크로드 이름 확인 먼저 — 연결 전에 멈출 수 있게
+    from common.queue import open_queue
+    from common.raw_store import open_raw_store
+    open_raw_store("collector")                  # RAW_STORE_DSN 없으면 멈춤 — 로컬 대체 없음 (2.3절)
+    _q = open_queue("collector")                 # QUEUE_DSN 없으면 멈춤 — 인메모리 대체 없음 (2.2절)
+    try:
+        _m.main(args.workload, _q)
+    finally:
+        _q.close()

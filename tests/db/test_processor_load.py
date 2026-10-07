@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, text
 
 from common.queue import MemoryQueue
 
@@ -244,12 +244,12 @@ def test_reprocess_range_by_raw_index_id(processor_up, raw_store, schema_engine,
     ids = sorted(r["id"] for r in _select(schema_engine, "raw_index"))
     assert len(ids) == 2
     monkeypatch.setattr(pm, "PARSER_VERSION", "v0.2")
-    assert pm.reprocess_range(ids[0], ids[0]) == 1                  # 양끝 포함, 범위 안만
+    assert pm.reprocess_range(ids[0], ids[0], MemoryQueue()) == 1                  # 양끝 포함, 범위 안만
     versions = [r["parser_version"] for r in _select(schema_engine, "ingest_runs") if r["raw_id"] == ids[0]]
     assert sorted(versions) == ["v0.1", "v0.2"]
-    assert pm.reprocess_range(ids[0], ids[1]) == 2
+    assert pm.reprocess_range(ids[0], ids[1], MemoryQueue()) == 2
     with pytest.raises(SystemExit):
-        pm.reprocess_range(ids[1], ids[0])
+        pm.reprocess_range(ids[1], ids[0], MemoryQueue())
 
 
 # ── 2026-10-02 점검 C1 — grading이 조회하는 층 값 = processor가 저장한 층 값 ──────
@@ -309,3 +309,50 @@ def test_live_dtrecent_raw_loads_station_and_observations(processor_up, raw_stor
     assert n == 300 * 6
     (msg,) = q.drain("obs.loaded")
     assert msg.payload["observed_to_utc"] and msg.payload["station_ids"] == ["tide:DT_0014"]
+
+
+# ── 7.11 T2 — 조위 보충 원문(어제분, tag `_y`): 관측·색인까지만 (1.2절, 개정 22) ──────────
+
+def _health(engine) -> list[dict]:
+    with engine.connect() as conn:
+        return [dict(r) for r in conn.execute(text("SELECT * FROM adapter_health ORDER BY adapter")).mappings()]
+
+
+@pytest.mark.parametrize("supplement_fails", [False, True])
+def test_T2_supplement_loads_rows_without_obs_loaded_or_health(processor_up, raw_store, schema_engine, tide,
+                                                                supplement_fails):
+    pm, _ = processor_up
+    today = tide.raw(tide.body([("DT_0014", "2026-08-01 00:05:00", 24.5)]), fetched_at="2026-07-31T15:10:00")
+    q = MemoryQueue()
+    pm.process(raw_store.put("dtRecent", "DT_0014", today), "dtRecent", q)
+    assert len(q.drain("obs.loaded")) == 1
+    health = _health(schema_engine)
+
+    if supplement_fails:
+        y = tide.raw(None, fetched_at="2026-07-31T15:10:01", error={"type": "NET_ERROR", "message": "주입"})
+    else:
+        y = tide.raw(tide.body([("DT_0014", "2026-07-31 23:55:00", 24.9), ("DT_0014", "2026-07-31 23:50:00", 24.8)]),
+                     fetched_at="2026-07-31T15:10:01")
+    q2 = MemoryQueue()
+    key = raw_store.put("dtRecent", "DT_0014_y", y)
+    pm.process(key, "dtRecent", q2)
+
+    assert q2.drain("obs.loaded") == []
+    assert _health(schema_engine) == health                     # 실패한 보충 원문도 연속 실패를 늘리지 않는다
+    with schema_engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM raw_index WHERE storage_key = :k"), {"k": key}).scalar_one() == 1
+        assert conn.execute(text("SELECT COUNT(*) FROM ingest_runs ir JOIN raw_index ri ON ri.id = ir.raw_id "
+                                 "WHERE ri.storage_key = :k"), {"k": key}).scalar_one() == 1
+        wt = conn.execute(text("SELECT observed_at_utc, value FROM observations WHERE metric = 'water_temp' "
+                               "ORDER BY observed_at_utc")).all()
+    if supplement_fails:
+        assert [float(v) for _, v in wt] == [24.5]
+    else:
+        assert [float(v) for _, v in wt] == [24.8, 24.9, 24.5]     # 어제분 2행 추가, 오늘 값은 그대로
+
+
+def test_y_suffix_on_other_source_is_not_supplement():
+    import processor.main as pm
+    assert pm._is_supplement("raw/dtRecent/2026/10/07/1791000000000_DT_0014_y.json", "dtRecent")
+    assert not pm._is_supplement("raw/dtRecent/2026/10/07/1791000000000_DT_0014.json", "dtRecent")
+    assert not pm._is_supplement("raw/sooList/2026/10/07/1791000000000_x_y.json", "sooList")

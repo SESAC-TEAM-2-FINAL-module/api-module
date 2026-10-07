@@ -76,18 +76,27 @@ class TestSD1Entrypoints:
         import grading.main as gr
         from common.seeds import load_seeds
 
-        class _FakeNats:
-            @classmethod
-            def from_env(cls, **kwargs):
-                return cls()
-            def run(self, handler):
-                pass
+        opened = []
 
-        monkeypatch.setattr(cq, "NatsQueue", _FakeNats)
+        class _FakeQueue(cq.MemoryQueue):
+            def __init__(self, workload):
+                super().__init__()
+                self.workload, self.ran = workload, False
+                opened.append(self)
+
+            def run(self):
+                self.ran = True
+
+        monkeypatch.setattr(cq, "open_queue", lambda workload, repo=None: _FakeQueue(workload))
 
         load_seeds(repo)
         gr.main([])
         assert ev.main(["evaluate"]) == 0
+        # grading은 한 큐에 두 구독, evaluation은 grade.done (2.2절, 개정 22)
+        assert [(q.workload, set(q._handlers), q.ran) for q in opened] == [
+            ("grading", {"obs.loaded", "interp.done"}, True),
+            ("evaluation", {"grade.done"}, True),
+        ]
         # sweep 본문은 웹 소유 farm_sites를 읽는다 — 여기서는 기동 검사를 지나 판정에 닿는지만 본다
         reached = {}
         monkeypatch.setattr(ev, "handle_sweep", lambda repo, cfg: reached.setdefault("sweep", True))

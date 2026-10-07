@@ -16,6 +16,7 @@ from common.config import load_env_config
 from common.http import fetch
 from common.queue import Queue, Message
 from common.raw_store import save_raw
+from common.contract_check import QUEUE_CONTRACT
 from collector._completeness import CompletenessRun, collect
 
 API_ID = "femoSeaList"
@@ -40,7 +41,7 @@ class FisheryBackfillAdapter:
             queue.publish(Message(
                 topic="raw.fetched",
                 payload={
-                    "schema": "queue-v2",
+                    "schema": QUEUE_CONTRACT,
                     "topic": "raw.fetched",
                     "raw_id": raw_id,
                     "api": API_ID,

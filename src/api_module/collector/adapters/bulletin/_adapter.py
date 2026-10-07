@@ -13,6 +13,7 @@ from common.config import load_env_config
 from common.http import fetch
 from common.queue import Queue, Message
 from common.raw_store import save_raw
+from common.contract_check import QUEUE_CONTRACT
 
 API_ID = "redtideList"
 _WINDOW_DAYS = 30
@@ -37,7 +38,7 @@ class BulletinCollectorAdapter:
         queue.publish(Message(
             topic="raw.fetched",
             payload={
-                "schema": "queue-v2",
+                "schema": QUEUE_CONTRACT,
                 "topic": "raw.fetched",
                 "raw_id": raw_id,
                 "api": API_ID,

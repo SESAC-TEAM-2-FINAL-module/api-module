@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import sys
-import uuid
 from datetime import datetime, timezone
 
 from common.config import database_url, load_definitions
@@ -16,6 +15,7 @@ from common.queue import Message, Queue
 
 from common.contract_check import QUEUE_CONTRACT, accept_message
 from common.idw_inputs import filter_stations
+from common.run_ids import run_id_from
 from ._idw import idw_estimate
 from ._loocv import compute_loocv
 
@@ -90,7 +90,7 @@ def _get_or_compute_error(repo, station_set_key: str, metric: str,
 
 def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
     """
-    obs.loaded 처리 — source=tide(조위관측소 적재)인 경우만 (queue-v1, 2.2절).
+    obs.loaded 처리 — source=tide(조위관측소 적재)인 경우만 (queue-v2, 2.2절).
     IDW → 가중치 기록 → 오차 조회/산출 → 적재 → interp.done 발행.
     멱등: (load_id, metric) 고유 제약이 같은 알림을 막는다.
     """
@@ -135,7 +135,7 @@ def handle_obs_loaded(payload: dict, repo, queue: Queue, defs: dict) -> None:
 
     # 양식장별 IDW
     # run_id: 입력 키(load_id+metric)에서 결정적으로 생성 — UUID v5 (재전달 멱등, 개정 22)
-    run_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{load_id}:{metric}"))
+    run_id = run_id_from(f"{load_id}:{metric}")
     error_window_days_val = None if _is_pending(cfg.get("error_window_days")) else int(cfg["error_window_days"])
 
     farm_rows = repo.get_farm_sites()
@@ -273,14 +273,14 @@ def main(argv: list[str] | None = None) -> None:
     if args and args[0] in ("interpolation-error", "error"):
         run_interpolation_error(repo, defs)
     else:
-        # QUEUE_DSN 있으면 NatsQueue, 없으면 멈춘다 (2.2절, 개정 22 — MemoryQueue 폴백 금지)
-        from common.queue import NatsQueue
-        _nq = NatsQueue.from_env(
-            consumer_name="interpolation-obs-loaded",
-            subscribed_topic="obs.loaded",
-            repo=repo,
-        )
-        _nq.run(lambda msg: handle_obs_loaded(msg.payload, repo, _nq, defs))
+        # obs.loaded 컨슈머 — QUEUE_DSN 없으면 멈춘다(인메모리 대체 없음), 메시지를 기다리며 계속 돈다 (2.2절, 개정 22)
+        from common.queue import open_queue
+        q = open_queue("interpolation", repo)
+        try:
+            q.subscribe("obs.loaded", lambda msg: handle_obs_loaded(msg.payload, repo, q, defs))
+            q.run()
+        finally:
+            q.close()
 
 
 if __name__ == "__main__":

@@ -19,6 +19,10 @@ class MemoryQueue(Queue):
     def subscribe(self, topic: str, handler: Callable[[Message], None]) -> None:
         self._handlers[topic].append(handler)
 
+    def run(self) -> None:
+        """인메모리는 발행 호출 안에서 바로 전달하므로 기다릴 것이 없다 — 테스트·시험 실행기 전용"""
+        return
+
     def drain(self, topic: str | None = None) -> list[Message]:
         if topic is None:
             return list(self._published)
