@@ -80,7 +80,7 @@
 | 설정 | 세 종류로 나눈다 (2.0.6절). **판정 정의**는 `config/definitions.yaml` — 이미지에 포함, CI 게이트가 대조. **운영 조정**은 ConfigMap — 인계 후 인프라 소유, 초기값은 `config/operational.initial.yaml`. **워크로드 설정**(CronJob 주기 등)은 `handoff/HANDOFF.md`에 권장값으로만 |
 | 계획서·지시서·보고 | `docs/plan/`, `docs/instructions/`, `docs/reports/` |
 | 이미지 이름 | `api-module/collector`·`processor`·`interpolation`·`grading`·`evaluation` (2.1절). 시험 전용 `api-module/flowtest`(2.1.1절 — 운영 워크로드 아님) |
-| Dockerfile | **`docker/<이미지>/Dockerfile`** — 이미지마다 하나. 공통 코드·`config/definitions.yaml`과 해당 단계 코드만 복사한다. **`evaluation`은 운영 조정 게이트용 합성 픽스처(`fixtures/synthetic/`)도** 복사한다(2.0.6절). **`processor`·`evaluation`은 운영 조정 스키마(`contracts/config/operational.schema.json` — 기동 시 검사용 계약, 값 아님)를, `processor`는 적조 해역 시드(`seeds/` — 별칭 정규화, 4.3절)도** 복사한다. 운영 조정 값은 이미지에 넣지 않는다. **`flowtest`는 예외로 단계 코드 5종과 `flowtest/`, 위 시드·스키마를 모두** 복사한다 — 운영 조정 값·인증키·DB 연결 문자열은 넣지 않는다(2.1.1절) |
+| Dockerfile | **`docker/<이미지>/Dockerfile`** — 이미지마다 하나. 공통 코드·`config/definitions.yaml`과 해당 단계 코드만 복사한다. **`evaluation`은 운영 조정 게이트용 합성 픽스처(`fixtures/synthetic/`)도** 복사한다(2.0.6절). **`processor`·`evaluation`은 운영 조정 스키마(`contracts/config/operational.schema.json` — 기동 시 검사용 계약, 값 아님)를, `processor`는 적조 해역 시드(`seeds/` — 별칭 정규화, 4.3절)도** 복사한다. 운영 조정 값은 이미지에 넣지 않는다. **단계 이미지 5종은 큐 정의(`contracts/queue/jetstream.json` — 기동 시 스트림·컨슈머 생성용 계약, 값 아님)도** 복사한다(2.2절). **`flowtest`는 예외로 단계 코드 5종과 `flowtest/`, 위 시드·스키마를 모두** 복사한다 — 운영 조정 값·인증키·DB 연결 문자열은 넣지 않는다(2.1.1절) |
 | 의존성 | `pyproject.toml`의 **이미지별 선택 의존성**으로. 한 단계의 라이브러리 갱신이 다른 이미지에 번지지 않게 한다 |
 | k8s 리소스 이름 | 2.1절 표 |
 | 레지스트리 주소 | 코드·매니페스트에 쓰지 않는다. **CI 변수 `REGISTRY` 하나**로 둔다 — 현재 GitLab Container Registry, ECR 전환 가능. 예외: 시험 실행기 전달물(`handoff/flowtest/`)에는 시험 후 폐기할 시험 저장소 주소를 적는다(2.1.1절) |
